@@ -25,7 +25,7 @@ export default async function AdminExpendituresPage() {
 
       <ExpenditureForm />
 
-      <ExpenditureViews expenditures={expenditures} events={events} />
+      <ExpenditureViews expenditures={expenditures ?? []} events={events ?? []} />
     </div>
   );
 }

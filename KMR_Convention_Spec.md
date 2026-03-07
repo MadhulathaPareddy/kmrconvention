@@ -22,7 +22,7 @@ The app replaces or supplements a spreadsheet used to track event bookings, pric
 
 ## 2. Business requirements (addressed)
 
-- Track **events** with: date, event type, event contact info, price (Indian Rupees), whether diesel is included (Y/N), and optional notes.
+- Track **events** with: date, event type, event contact info, price (Indian Rupees), whether **diesel is included (Y/N)**, and optional notes. **When diesel is selected, a Diesel expenditure of ₹30,000 is automatically created and linked to that event.** The same happens when an existing event is updated to diesel included; existing events that already have diesel included get the expenditure backfilled once.
 - Support event types: Marriage, Reception, Birthday, Corporate, Other.
 - Track **monthly** metrics: number of events, total revenue, total expenditure, and profit per month.
 - Track **expenditures** with: date, amount, category, and optional description.
@@ -91,7 +91,7 @@ Admin routes are wrapped in a layout that checks admin session and redirects to 
 ### 3.7 Important implementation details
 
 - **Currency:** All monetary values are in Indian Rupees (₹); displayed with `Intl.NumberFormat` for INR.
-- **Schema auto-init:** On first DB access, the app runs `ensureSchemaOnce()` which creates the three tables if they do not exist. Existing databases receive new columns (`event_id`, `category_other` on expenditures) via conditional `ALTER TABLE` so no manual migration is required.
+- **Schema auto-init:** On first DB access, the app runs `ensureSchemaOnce()` which creates the three tables if they do not exist. Existing databases receive new columns (`event_id`, `category_other` on expenditures) via conditional `ALTER TABLE` so no manual migration is required. **Backfill:** Events that have `diesel_included = true` and do not yet have a linked Diesel ₹30,000 expenditure get one created automatically (idempotent, runs as part of schema init).
 - **Comments:** Stored per event; no moderation or edit/delete in the current scope.
 - **Admin login:** After successful login, the client performs a full page redirect (`window.location.href = '/'`) so the next request sends the session cookie and the server-rendered layout shows admin nav (Add Event, Expenditures, Logout) immediately.
 
@@ -110,7 +110,7 @@ Admin routes are wrapped in a layout that checks admin session and redirects to 
 
 ## 5. What was done “so far” (for handover or spec tools)
 
-- Full event CRUD and listing with filters (date range). **Admin can edit events** from the event detail page (Edit event button) or via `/admin/events/[id]/edit`.
+- Full event CRUD and listing with filters (date range). **Admin can edit events** from the event detail page (Edit event button) or via `/admin/events/[id]/edit`. **When an event is created or updated with “diesel included”, a Diesel expenditure of ₹30,000 is automatically added and linked to that event (idempotent).** Existing events with diesel included get this expenditure backfilled on schema init.
 - Expenditure create/delete and listing; **optional link to event** (dropdown; if not linked, **description required**); when category is **Other**, **category_other (specify category name) required**. **Expenditure views:** monthly, event-wise, and yearly (grouped with totals).
 - Comments on events (create and list).
 - Monthly summary (event count, revenue, expenditure, profit) with optional year filter.

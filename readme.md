@@ -6,7 +6,7 @@ A simple web app to manage a convention hall in Hyderabad: track events, revenue
 
 ## What it does
 
-- **Events** — Bookings with date, type (Marriage, Reception, etc.), contact, price (₹), diesel included (Y/N). Admin can **edit** events from the event detail page.
+- **Events** — Bookings with date, type (Marriage, Reception, etc.), contact, price (₹), **diesel included (Y/N)**. When diesel is included, a **Diesel expenditure of ₹30,000** is automatically added and linked to that event. Admin can **edit** events from the event detail page.
 - **Monthly summary** — Events count, revenue, expenditure, and profit per month.
 - **Expenditures** — Log spending by category; optionally **link to an event** (or leave as “current month” general expense). If not linked to an event, **description is required**. If category is **Other**, a **specify category name** field is required. View expenditures **monthly**, **event-wise**, or **yearly**.
 - **Comments** — Visitors can add comments on any event.

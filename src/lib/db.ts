@@ -60,9 +60,41 @@ async function ensureSchemaOnce(): Promise<void> {
           created_at TIMESTAMPTZ DEFAULT NOW()
         )
       `;
+      // Backfill: add Diesel ₹30,000 expenditure for every event that has diesel_included = true
+      // and does not already have such an expenditure. Idempotent.
+      await sql`
+        INSERT INTO expenditures (date, amount, category, description, event_id)
+        SELECT e.date, 30000, 'Diesel', 'Diesel (included with event)', e.id
+        FROM events e
+        WHERE e.diesel_included = true
+        AND NOT EXISTS (
+          SELECT 1 FROM expenditures ex
+          WHERE ex.event_id = e.id AND ex.category = 'Diesel' AND ex.amount = 30000
+        )
+      `;
     })();
   }
   await schemaPromise;
+}
+
+const DIESEL_EXPENDITURE_AMOUNT = 30000;
+
+/** Ensure one Diesel expenditure (₹30,000) exists for this event. Idempotent. */
+async function ensureDieselExpenditureForEvent(
+  sql: ReturnType<typeof getSql>,
+  eventId: string,
+  eventDate: string
+): Promise<void> {
+  const existing = await sql`
+    SELECT 1 FROM expenditures
+    WHERE event_id = ${eventId}::uuid AND category = 'Diesel' AND amount = ${DIESEL_EXPENDITURE_AMOUNT}
+    LIMIT 1
+  `;
+  if (Array.isArray(existing) && existing.length > 0) return;
+  await sql`
+    INSERT INTO expenditures (date, amount, category, description, event_id)
+    VALUES (${eventDate}::date, ${DIESEL_EXPENDITURE_AMOUNT}, 'Diesel', 'Diesel (included with event)', ${eventId}::uuid)
+  `;
 }
 
 // Neon returns rows array directly
@@ -109,7 +141,11 @@ export async function createEvent(data: {
     VALUES (${data.date}::date, ${data.event_type}, ${data.contact_info ?? null}, ${data.price}, ${data.diesel_included}, ${data.notes ?? null})
     RETURNING id, date, event_type, contact_info, price, diesel_included, notes, created_at, updated_at
   `;
-  return (rows as unknown as Event[])[0];
+  const event = (rows as unknown as Event[])[0];
+  if (event && data.diesel_included) {
+    await ensureDieselExpenditureForEvent(sql, event.id, event.date);
+  }
+  return event;
 }
 
 export async function updateEvent(
@@ -139,7 +175,11 @@ export async function updateEvent(
     WHERE id = ${id}::uuid
     RETURNING id, date, event_type, contact_info, price, diesel_included, notes, created_at, updated_at
   `;
-  return (rows as unknown as Event[])[0] ?? null;
+  const updated = (rows as unknown as Event[])[0] ?? null;
+  if (updated && updated.diesel_included) {
+    await ensureDieselExpenditureForEvent(sql, updated.id, updated.date);
+  }
+  return updated;
 }
 
 export async function deleteEvent(id: string): Promise<boolean> {
