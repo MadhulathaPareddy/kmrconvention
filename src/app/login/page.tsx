@@ -32,11 +32,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="mx-auto max-w-sm space-y-6 rounded-xl border border-amber-200/60 bg-white p-8 shadow-sm">
-      <h1 className="text-xl font-bold text-amber-900">Admin login</h1>
+    <div className="mx-auto max-w-sm space-y-6 rounded-xl border border-seagreen-light bg-white p-8 shadow-sm">
+      <h1 className="text-xl font-bold text-seagreen-dark">Admin login</h1>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="password" className="block text-sm font-medium text-stone-700">
+          <label htmlFor="password" className="block text-sm font-medium text-neutral-700">
             Password
           </label>
           <input
@@ -44,7 +44,7 @@ export default function LoginPage() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 w-full rounded-md border border-stone-200 px-3 py-2"
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
             required
             autoFocus
           />
@@ -55,7 +55,7 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-md bg-amber-700 py-2 font-medium text-white hover:bg-amber-600 disabled:opacity-50"
+          className="w-full rounded-md bg-seagreen py-2 font-medium text-white hover:bg-seagreen-dark disabled:opacity-50"
         >
           {loading ? 'Logging in…' : 'Login'}
         </button>

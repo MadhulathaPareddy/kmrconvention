@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "spec:docx": "pandoc KMR_Convention_Spec.md -o KMR_Convention_Spec.docx"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.10.0",

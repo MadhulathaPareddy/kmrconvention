@@ -1,85 +1,66 @@
-# KMR Convention — Hyderabad
+# KMR Convention
 
-TypeScript web app for managing a convention hall: events, revenue, expenditures, and comments.
+A simple web app to manage a convention hall in Hyderabad: track events, revenue, expenditures, and comments.
 
-## Features
+---
 
-- **Events**: Date, type (Marriage, Reception, Birthday, Corporate, Other), contact info, price (₹), diesel included (Y/N), notes.
-- **Monthly summary**: Event count, revenue, expenditure, and profit by month.
-- **Expenditures**: By category — Diesel, Maintenance, Staff, Utilities, Catering, Cleaning, Security, Supplies, Decoration, Other.
-- **Comments**: Anyone can view events and add comments on an event (name, email optional, content).
-- **Roles**:
-  - **Admin**: Add/edit/delete events, add/delete expenditures. Set password via `ADMIN_PASSWORD` env.
-  - **User**: View events, monthly summary, and add comments.
+## What it does
 
-## Tech stack
+- **Events** — Bookings with date, type (Marriage, Reception, etc.), contact, price (₹), diesel included (Y/N).
+- **Monthly summary** — Events count, revenue, expenditure, and profit per month.
+- **Expenditures** — Log spending by category (Diesel, Maintenance, Staff, etc.).
+- **Comments** — Visitors can add comments on any event.
 
-- **Next.js 16** (App Router), **TypeScript**, **Tailwind CSS**
-- **Vercel Postgres** (Neon) — use **Neon Postgres** from the Vercel Storage/Marketplace (free tier). The project uses `@neondatabase/serverless`; set `POSTGRES_URL` or `DATABASE_URL` to your Neon connection string.
+**Admin** (password in env) can add/edit/delete events and expenditures. **Everyone** can view and comment.
 
-## Local development
+---
 
-1. **Clone and install**
+## Tech
 
-   ```bash
-   npm install
-   ```
+- **Next.js 16** + **TypeScript** + **Tailwind CSS**
+- **Neon Postgres** (free tier, works on Vercel)
 
-2. **Database**
+---
 
-   Use [Neon Postgres](https://neon.tech) (free tier) with Vercel:
+## Quick start
 
-   - Create a project on [Vercel](https://vercel.com).
-   - In the project: **Storage** → **Create Database** → choose **Postgres** (Neon), or add **Neon** from the Integrations/Marketplace.
-   - Connect the database; Vercel may add `POSTGRES_URL` or you can copy the connection string and set `DATABASE_URL` in env.
+```bash
+npm install
+cp .env.example .env.local
+```
 
-   For local env, copy the Neon connection string and add to `.env.local`:
+Edit `.env.local`:
 
-   ```bash
-   cp .env.example .env.local
-   # Edit .env.local: set POSTGRES_URL or DATABASE_URL, and ADMIN_PASSWORD.
-   ```
+- `POSTGRES_URL` or `DATABASE_URL` — Neon Postgres connection string
+- `ADMIN_PASSWORD` — Admin login password
 
-   Create tables once (either run the SQL below in the Vercel Postgres query tab, or call the init API once):
+Then:
 
-   ```bash
-   curl -X POST http://localhost:3000/api/init
-   ```
+```bash
+npm run dev
+```
 
-   Or run the SQL in `src/lib/schema.sql` in the **Vercel Dashboard → Storage → your Postgres → Query** tab.
+Open **http://localhost:3000**. Tables are created automatically on first use.
 
-3. **Run**
+---
 
-   ```bash
-   npm run dev
-   ```
+## Deploy (Vercel)
 
-   Open [http://localhost:3000](http://localhost:3000). Log in as admin with `ADMIN_PASSWORD` to add events and expenditures.
+1. Import the repo in Vercel.
+2. Add **Neon Postgres** (Storage/Marketplace) and connect it.
+3. Set **ADMIN_PASSWORD** in Environment Variables.
+4. Deploy. No need to run schema manually — it runs on first request.
 
-## Deploy on Vercel
+---
 
-1. Push the repo to GitHub and import the project in Vercel.
-2. Add **Storage** → **Postgres** (Neon) and connect it to the project (env vars are set automatically).
-3. In **Settings → Environment Variables**, set:
-   - `ADMIN_PASSWORD` — strong password for admin login.
-4. Deploy. After first deploy, run the schema once:
-   - Either run the contents of `src/lib/schema.sql` in **Vercel → Storage → Postgres → Query**,
-   - Or `curl -X POST https://your-app.vercel.app/api/init` (optional, if you prefer API init).
+## Scripts
 
-## Environment variables
+| Command       | Description        |
+|---------------|--------------------|
+| `npm run dev` | Start dev server   |
+| `npm run build` | Production build |
+| `npm run start` | Run production |
 
-| Variable           | Description                                  |
-|--------------------|----------------------------------------------|
-| `POSTGRES_URL` or `DATABASE_URL` | Neon Postgres connection string (from Vercel or Neon dashboard) |
-| `ADMIN_PASSWORD`   | Password for admin login (required)          |
+---
 
-## Project structure
-
-- `src/app/` — App Router pages and API routes.
-- `src/app/api/` — Auth, events, expenditures, comments, summary, init.
-- `src/lib/` — `db.ts` (queries), `auth.ts`, `types.ts`, `format.ts`, `schema.sql`.
-- `src/components/` — `Nav`, `AuthProvider`.
-
-## License
-
-Private use for KMR Convention.
+*KMR Convention — Hyderabad*

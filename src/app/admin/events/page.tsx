@@ -35,7 +35,7 @@ export default function AddEventPage() {
         setError(data.error || 'Failed to add event');
         return;
       }
-      router.push('/events');
+      router.push('/events?added=1');
       router.refresh();
     } finally {
       setSubmitting(false);
@@ -44,13 +44,16 @@ export default function AddEventPage() {
 
   return (
     <div className="mx-auto max-w-lg space-y-6">
-      <h1 className="text-2xl font-bold text-amber-900">Add event</h1>
+      <h1 className="text-2xl font-bold text-seagreen-dark">Add event</h1>
+      <p className="text-sm text-neutral-600">
+        Required: Date, event type, and price. Saved events are visible to all users immediately.
+      </p>
       <form
         onSubmit={handleSubmit}
-        className="space-y-4 rounded-xl border border-amber-200/60 bg-white p-6 shadow-sm"
+        className="space-y-4 rounded-xl border border-seagreen-light bg-white p-6 shadow-sm"
       >
         <div>
-          <label htmlFor="date" className="block text-sm font-medium text-stone-700">
+          <label htmlFor="date" className="block text-sm font-medium text-neutral-700">
             Date *
           </label>
           <input
@@ -58,19 +61,19 @@ export default function AddEventPage() {
             type="date"
             value={form.date}
             onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-            className="mt-1 w-full rounded-md border border-stone-200 px-3 py-2"
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
             required
           />
         </div>
         <div>
-          <label htmlFor="event_type" className="block text-sm font-medium text-stone-700">
+          <label htmlFor="event_type" className="block text-sm font-medium text-neutral-700">
             Event type *
           </label>
           <select
             id="event_type"
             value={form.event_type}
             onChange={(e) => setForm((f) => ({ ...f, event_type: e.target.value }))}
-            className="mt-1 w-full rounded-md border border-stone-200 px-3 py-2"
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
           >
             {EVENT_TYPES.map((t) => (
               <option key={t} value={t}>
@@ -80,7 +83,7 @@ export default function AddEventPage() {
           </select>
         </div>
         <div>
-          <label htmlFor="contact_info" className="block text-sm font-medium text-stone-700">
+          <label htmlFor="contact_info" className="block text-sm font-medium text-neutral-700">
             Contact info
           </label>
           <input
@@ -88,12 +91,12 @@ export default function AddEventPage() {
             type="text"
             value={form.contact_info}
             onChange={(e) => setForm((f) => ({ ...f, contact_info: e.target.value }))}
-            className="mt-1 w-full rounded-md border border-stone-200 px-3 py-2"
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
             placeholder="e.g. Name or phone"
           />
         </div>
         <div>
-          <label htmlFor="price" className="block text-sm font-medium text-stone-700">
+          <label htmlFor="price" className="block text-sm font-medium text-neutral-700">
             Price (₹) *
           </label>
           <input
@@ -102,7 +105,7 @@ export default function AddEventPage() {
             min={0}
             value={form.price}
             onChange={(e) => setForm((f) => ({ ...f, price: Number(e.target.value) || 0 }))}
-            className="mt-1 w-full rounded-md border border-stone-200 px-3 py-2"
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
             required
           />
         </div>
@@ -112,14 +115,14 @@ export default function AddEventPage() {
             type="checkbox"
             checked={form.diesel_included}
             onChange={(e) => setForm((f) => ({ ...f, diesel_included: e.target.checked }))}
-            className="h-4 w-4 rounded border-stone-300"
+            className="h-4 w-4 rounded border-neutral-300 text-seagreen"
           />
-          <label htmlFor="diesel" className="text-sm font-medium text-stone-700">
+          <label htmlFor="diesel" className="text-sm font-medium text-neutral-700">
             Diesel included
           </label>
         </div>
         <div>
-          <label htmlFor="notes" className="block text-sm font-medium text-stone-700">
+          <label htmlFor="notes" className="block text-sm font-medium text-neutral-700">
             Notes
           </label>
           <textarea
@@ -127,7 +130,7 @@ export default function AddEventPage() {
             rows={2}
             value={form.notes}
             onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-            className="mt-1 w-full rounded-md border border-stone-200 px-3 py-2"
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
           />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
@@ -135,14 +138,14 @@ export default function AddEventPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="rounded-md bg-amber-700 px-4 py-2 font-medium text-white hover:bg-amber-600 disabled:opacity-50"
+            className="rounded-md bg-seagreen px-4 py-2 font-medium text-white hover:bg-seagreen-dark disabled:opacity-50"
           >
-            {submitting ? 'Adding…' : 'Add event'}
+            {submitting ? 'Saving…' : 'Save event'}
           </button>
           <button
             type="button"
             onClick={() => router.back()}
-            className="rounded-md border border-stone-200 px-4 py-2 font-medium hover:bg-stone-50"
+            className="rounded-md border border-neutral-200 px-4 py-2 font-medium hover:bg-neutral-50"
           >
             Cancel
           </button>

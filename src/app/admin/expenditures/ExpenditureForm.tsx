@@ -47,12 +47,12 @@ export function ExpenditureForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-xl border border-amber-200/60 bg-amber-50/30 p-4"
+      className="rounded-xl border border-seagreen-light bg-seagreen-light/30 p-4"
     >
-      <h2 className="mb-4 text-lg font-semibold text-amber-900">Add expenditure</h2>
+      <h2 className="mb-4 text-lg font-semibold text-seagreen-dark">Add expenditure</h2>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <label htmlFor="ex-date" className="block text-xs font-medium text-stone-600">
+          <label htmlFor="ex-date" className="block text-xs font-medium text-neutral-600">
             Date *
           </label>
           <input
@@ -60,12 +60,12 @@ export function ExpenditureForm() {
             type="date"
             value={form.date}
             onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-            className="mt-1 w-full rounded-md border border-stone-200 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2 text-sm"
             required
           />
         </div>
         <div>
-          <label htmlFor="ex-amount" className="block text-xs font-medium text-stone-600">
+          <label htmlFor="ex-amount" className="block text-xs font-medium text-neutral-600">
             Amount (₹) *
           </label>
           <input
@@ -76,19 +76,19 @@ export function ExpenditureForm() {
             onChange={(e) =>
               setForm((f) => ({ ...f, amount: Number(e.target.value) || 0 }))
             }
-            className="mt-1 w-full rounded-md border border-stone-200 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2 text-sm"
             required
           />
         </div>
         <div>
-          <label htmlFor="ex-category" className="block text-xs font-medium text-stone-600">
+          <label htmlFor="ex-category" className="block text-xs font-medium text-neutral-600">
             Category *
           </label>
           <select
             id="ex-category"
             value={form.category}
             onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-            className="mt-1 w-full rounded-md border border-stone-200 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2 text-sm"
           >
             {EXPENDITURE_CATEGORIES.map((c) => (
               <option key={c} value={c}>
@@ -101,14 +101,14 @@ export function ExpenditureForm() {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full rounded-md bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-50"
+            className="w-full rounded-md bg-seagreen px-4 py-2 text-sm font-medium text-white hover:bg-seagreen-dark disabled:opacity-50"
           >
             {submitting ? 'Adding…' : 'Add'}
           </button>
         </div>
       </div>
       <div className="mt-3">
-        <label htmlFor="ex-desc" className="block text-xs font-medium text-stone-600">
+        <label htmlFor="ex-desc" className="block text-xs font-medium text-neutral-600">
           Description (optional)
         </label>
         <input
@@ -116,7 +116,7 @@ export function ExpenditureForm() {
           type="text"
           value={form.description}
           onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-          className="mt-1 w-full rounded-md border border-stone-200 px-3 py-2 text-sm"
+          className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2 text-sm"
           placeholder="e.g. Generator fuel, staff salary"
         />
       </div>

@@ -14,32 +14,32 @@ export default async function SummaryPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-amber-900">Monthly summary</h1>
-      <p className="text-stone-600">
+      <h1 className="text-2xl font-bold text-seagreen-dark">Monthly summary</h1>
+      <p className="text-neutral-600">
         Events count, revenue, expenditure and profit by month.
       </p>
 
       {summaries.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-amber-200 bg-amber-50/50 py-12 text-center text-stone-500">
+        <p className="rounded-xl border border-dashed border-seagreen-light bg-seagreen-light/50 py-12 text-center text-neutral-500">
           No data yet. Add events and expenditures to see monthly summaries.
         </p>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-amber-200/60 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-xl border border-seagreen-light bg-white shadow-sm">
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="border-b border-amber-100 bg-amber-50/50">
-                <th className="px-4 py-3 font-medium text-amber-900">Month</th>
-                <th className="px-4 py-3 font-medium text-amber-900">Events</th>
-                <th className="px-4 py-3 font-medium text-amber-900">Revenue</th>
-                <th className="px-4 py-3 font-medium text-amber-900">Expenditure</th>
-                <th className="px-4 py-3 font-medium text-amber-900">Profit</th>
+              <tr className="border-b border-seagreen-light bg-seagreen-light/50">
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Month</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Events</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Revenue</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Expenditure</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Profit</th>
               </tr>
             </thead>
             <tbody>
               {summaries.map((s) => (
                 <tr
                   key={s.month}
-                  className="border-b border-stone-100 last:border-0 hover:bg-amber-50/30"
+                  className="border-b border-neutral-100 last:border-0 hover:bg-seagreen-light/30"
                 >
                   <td className="px-4 py-3 font-medium">
                     {monthLabel(s.month)}
@@ -51,7 +51,7 @@ export default async function SummaryPage() {
                   <td className="px-4 py-3 text-red-700">
                     {formatINR(s.expenditure)}
                   </td>
-                  <td className="px-4 py-3 font-medium text-amber-800">
+                  <td className="px-4 py-3 font-medium text-seagreen-dark">
                     {formatINR(s.profit)}
                   </td>
                 </tr>

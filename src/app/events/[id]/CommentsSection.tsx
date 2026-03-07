@@ -62,15 +62,15 @@ export function CommentsSection({ eventId }: { eventId: string }) {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-amber-900">Comments</h2>
+      <h2 className="text-lg font-semibold text-seagreen-dark">Comments</h2>
 
       <form
         onSubmit={handleSubmit}
-        className="rounded-xl border border-amber-200/60 bg-amber-50/30 p-4"
+        className="rounded-xl border border-seagreen-light bg-seagreen-light/30 p-4"
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label htmlFor="comment-name" className="block text-xs font-medium text-stone-600">
+            <label htmlFor="comment-name" className="block text-xs font-medium text-neutral-600">
               Name *
             </label>
             <input
@@ -78,12 +78,12 @@ export function CommentsSection({ eventId }: { eventId: string }) {
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="mt-1 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm"
               required
             />
           </div>
           <div>
-            <label htmlFor="comment-email" className="block text-xs font-medium text-stone-600">
+            <label htmlFor="comment-email" className="block text-xs font-medium text-neutral-600">
               Email (optional)
             </label>
             <input
@@ -91,12 +91,12 @@ export function CommentsSection({ eventId }: { eventId: string }) {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm"
             />
           </div>
         </div>
         <div className="mt-3">
-          <label htmlFor="comment-content" className="block text-xs font-medium text-stone-600">
+          <label htmlFor="comment-content" className="block text-xs font-medium text-neutral-600">
             Comment *
           </label>
           <textarea
@@ -111,16 +111,16 @@ export function CommentsSection({ eventId }: { eventId: string }) {
         <button
           type="submit"
           disabled={submitting}
-          className="mt-3 rounded-md bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-50"
+          className="mt-3 rounded-md bg-seagreen px-4 py-2 text-sm font-medium text-white hover:bg-seagreen-dark disabled:opacity-50"
         >
           {submitting ? 'Posting…' : 'Post comment'}
         </button>
       </form>
 
       {loading ? (
-        <p className="text-sm text-stone-500">Loading comments…</p>
+        <p className="text-sm text-neutral-500">Loading comments…</p>
       ) : comments.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-amber-200 py-6 text-center text-sm text-stone-500">
+        <p className="rounded-lg border border-dashed border-seagreen-light py-6 text-center text-sm text-neutral-500">
           No comments yet. Be the first to add one.
         </p>
       ) : (
@@ -128,14 +128,14 @@ export function CommentsSection({ eventId }: { eventId: string }) {
           {comments.map((c) => (
             <li
               key={c.id}
-              className="rounded-lg border border-stone-200 bg-white p-4"
+              className="rounded-lg border border-neutral-200 bg-white p-4"
             >
-              <p className="text-sm font-medium text-amber-900">{c.author_name}</p>
+              <p className="text-sm font-medium text-seagreen-dark">{c.author_name}</p>
               {c.author_email && (
-                <p className="text-xs text-stone-500">{c.author_email}</p>
+                <p className="text-xs text-neutral-500">{c.author_email}</p>
               )}
-              <p className="mt-1 text-stone-700">{c.content}</p>
-              <p className="mt-2 text-xs text-stone-400">
+              <p className="mt-1 text-neutral-700">{c.content}</p>
+              <p className="mt-2 text-xs text-neutral-400">
                 {formatDate(c.created_at)}
               </p>
             </li>
