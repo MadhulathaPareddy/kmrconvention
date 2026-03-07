@@ -19,6 +19,8 @@ export interface Expenditure {
   category: string;
   description: string | null;
   created_at: string;
+  event_id: string | null;
+  category_other: string | null;
 }
 
 export interface Comment {

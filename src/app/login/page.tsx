@@ -1,10 +1,8 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 export default function LoginPage() {
-  const router = useRouter();
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -24,8 +22,9 @@ export default function LoginPage() {
         setError(data.error || 'Login failed');
         return;
       }
-      router.push('/');
-      router.refresh();
+      // Full page load so cookie is sent and admin view shows immediately
+      window.location.href = '/';
+      return;
     } finally {
       setLoading(false);
     }

@@ -28,9 +28,10 @@ The app replaces or supplements a spreadsheet used to track event bookings, pric
 - Track **expenditures** with: date, amount, category, and optional description.
 - Expenditure categories: Diesel, Maintenance, Staff, Utilities, Catering, Cleaning, Security, Supplies, Decoration, Other.
 - **Two roles:**  
-  - **Admin:** Can add, edit, and delete events; add and delete expenditures. Authenticated via a single shared password (environment variable).  
-  - **User (viewer):** Can view all events, monthly summary, and event details; can add comments on events (name, optional email, comment text). Cannot add or edit events or expenditures.
+  - **Admin:** Can add, **edit**, and delete events; add and delete expenditures. Authenticated via a single shared password (environment variable). **After login, the app does a full page reload so the admin view (Add Event, Expenditures, Logout) appears immediately.**
+- **User (viewer):** Can view all events, monthly summary, and event details; can add comments on events (name, optional email, comment text). Cannot add or edit events or expenditures.
 - Use a **free, Vercel-friendly database** — implemented with Neon Postgres (free tier), accessible from Vercel via connection string.
+- **Expenditures:** Can optionally be **linked to an event** (dropdown). If not linked, the expense is treated as general/current month and **description is mandatory**. If category is **Other**, a **“Specify category name”** field is required. Expenditures can be viewed in three ways: **monthly** (grouped by month), **event-wise** (grouped by linked event or “No event”), and **yearly** (grouped by year).
 
 ---
 
@@ -40,7 +41,7 @@ The app replaces or supplements a spreadsheet used to track event bookings, pric
 
 - **Framework:** Next.js 16 with App Router.
 - **Language:** TypeScript.
-- **Styling:** Tailwind CSS. Amber/stone theme for a convention-hall look.
+- **Styling:** Tailwind CSS. **White background with seagreen** accent theme.
 - **Deployment target:** Vercel (or any Node host); database is external (Neon).
 
 ### 3.2 Database
@@ -54,7 +55,7 @@ The app replaces or supplements a spreadsheet used to track event bookings, pric
 - **events**  
   - id (UUID), date, event_type, contact_info, price, diesel_included, notes, created_at, updated_at.
 - **expenditures**  
-  - id (UUID), date, amount, category, description, created_at.
+  - id (UUID), date, amount, category, description, **event_id** (optional FK to events, SET NULL on delete), **category_other** (when category is “Other”), created_at.
 - **comments**  
   - id (UUID), event_id (FK to events, CASCADE delete), author_name, author_email, content, created_at.
 
@@ -69,7 +70,7 @@ Monthly summaries (event count, revenue, expenditure, profit) are **computed** f
 
 - **Auth:** `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/session`.
 - **Events:** `GET /api/events` (optional query: `from`, `to`), `POST /api/events`, `GET /api/events/[id]`, `PATCH /api/events/[id]`, `DELETE /api/events/[id]`. Mutations require admin.
-- **Expenditures:** `GET /api/expenditures` (optional `from`, `to`), `POST /api/expenditures`, `DELETE /api/expenditures/[id]`. Mutations require admin.
+- **Expenditures:** `GET /api/expenditures` (optional `from`, `to`), `POST /api/expenditures` (body may include `event_id`, `category_other` when category is “Other”; validation: description required when not linked to event, category_other required when category is “Other”), `DELETE /api/expenditures/[id]`. Mutations require admin.
 - **Comments:** `GET /api/comments?eventId=...`, `POST /api/comments`. No auth required for comments.
 - **Summary:** `GET /api/summary` (optional query: `year`). Returns monthly aggregates.
 - **Init (optional):** `POST /api/init` — ensures schema exists (calls same logic as auto-init).
@@ -78,19 +79,21 @@ Monthly summaries (event count, revenue, expenditure, profit) are **computed** f
 
 - **Dashboard (/):** Current month’s event count, revenue, expenditure, profit; list of recent events with links to detail.
 - **Events list (/events):** Table of all events (date, type, contact, price, diesel). Links to event detail.
-- **Event detail (/events/[id]):** Single event info and a comments section (list + form to add comment).
+- **Event detail (/events/[id]):** Single event info, **Edit event** button (admin only, links to edit page), and a comments section (list + form to add comment).
 - **Monthly summary (/summary):** Table of months with event count, revenue, expenditure, profit.
 - **Admin — Add event (/admin/events):** Form to create event (date, type, contact, price, diesel, notes). Protected; redirects to login if not admin.
-- **Admin — Expenditures (/admin/expenditures):** Form to add expenditure (date, amount, category, description); table of expenditures with delete. Protected.
-- **Login (/login):** Password form; on success sets admin cookie and redirects to home.
+- **Admin — Edit event (/admin/events/[id]/edit):** Form to update an existing event (same fields as add). Protected.
+- **Admin — Expenditures (/admin/expenditures):** Form to add expenditure (date, amount, category, optional **link to event**, description; when category “Other”, **specify category name**). **View modes:** Monthly, Event-wise, Yearly. Protected.
+- **Login (/login):** Password form; on success sets admin cookie and **redirects to home with a full page reload** so the admin view is shown immediately.
 
 Admin routes are wrapped in a layout that checks admin session and redirects to `/login` if not authenticated.
 
 ### 3.7 Important implementation details
 
 - **Currency:** All monetary values are in Indian Rupees (₹); displayed with `Intl.NumberFormat` for INR.
-- **Schema auto-init:** On first DB access, the app runs `ensureSchemaOnce()` which creates the three tables if they do not exist. This avoids “relation does not exist” on a fresh Neon database.
+- **Schema auto-init:** On first DB access, the app runs `ensureSchemaOnce()` which creates the three tables if they do not exist. Existing databases receive new columns (`event_id`, `category_other` on expenditures) via conditional `ALTER TABLE` so no manual migration is required.
 - **Comments:** Stored per event; no moderation or edit/delete in the current scope.
+- **Admin login:** After successful login, the client performs a full page redirect (`window.location.href = '/'`) so the next request sends the session cookie and the server-rendered layout shows admin nav (Add Event, Expenditures, Logout) immediately.
 
 ---
 
@@ -98,7 +101,7 @@ Admin routes are wrapped in a layout that checks admin session and redirects to 
 
 - **README.md** — Basic project details and quick start.
 - **.env.example** — Example env vars (POSTGRES_URL or DATABASE_URL, ADMIN_PASSWORD).
-- **src/app/** — Next.js App Router: `page.tsx` (dashboard), `layout.tsx`, `login/page.tsx`, `events/page.tsx`, `events/[id]/page.tsx`, `summary/page.tsx`, `admin/events/page.tsx`, `admin/expenditures/page.tsx`, `admin/layout.tsx`.
+- **src/app/** — Next.js App Router: `page.tsx` (dashboard), `layout.tsx`, `login/page.tsx`, `events/page.tsx`, `events/[id]/page.tsx` (with Edit event button for admin), `summary/page.tsx`, `admin/events/page.tsx`, `admin/events/[id]/edit/page.tsx` (edit event), `admin/expenditures/page.tsx` (with ExpenditureForm and ExpenditureViews: monthly / event-wise / yearly), `admin/layout.tsx`.
 - **src/app/api/** — Route handlers: auth (login, logout, session), events (CRUD), expenditures (create, list, delete), comments (list, create), summary (monthly aggregates), init (schema).
 - **src/lib/** — `db.ts` (Neon client, schema init, all queries), `auth.ts` (admin session helpers), `types.ts` (Event, Expenditure, Comment, categories), `format.ts` (INR, date formatting), `schema.sql` (reference DDL).
 - **src/components/** — `Nav.tsx` (navigation and admin/user actions), `AuthProvider.tsx` (client-side admin state).
@@ -107,15 +110,14 @@ Admin routes are wrapped in a layout that checks admin session and redirects to 
 
 ## 5. What was done “so far” (for handover or spec tools)
 
-- Full event CRUD and listing with filters (date range).
-- Full expenditure create/delete and listing; monthly expenditure aggregation.
+- Full event CRUD and listing with filters (date range). **Admin can edit events** from the event detail page (Edit event button) or via `/admin/events/[id]/edit`.
+- Expenditure create/delete and listing; **optional link to event** (dropdown; if not linked, **description required**); when category is **Other**, **category_other (specify category name) required**. **Expenditure views:** monthly, event-wise, and yearly (grouped with totals).
 - Comments on events (create and list).
 - Monthly summary (event count, revenue, expenditure, profit) with optional year filter.
-- Admin authentication (password, cookie session) and protection of admin-only pages and APIs.
+- Admin authentication (password, cookie session); **full page redirect after login** so admin view shows immediately. Protection of admin-only pages and APIs.
 - Public dashboard, events list, event detail with comments, and monthly summary.
-- Neon Postgres integration with automatic schema creation on first use.
-- README with basic details and a separate spec document (this file) for explaining the project to other people or spec tools.
-- Design and UX: amber/stone theme, responsive layout, tables and forms suitable for convention-hall operations.
+- Neon Postgres integration with automatic schema creation (and optional column migration for existing DBs).
+- README and this spec document. **Theme:** white background with seagreen accents.
 
 ---
 
@@ -129,4 +131,4 @@ Admin routes are wrapped in a layout that checks admin session and redirects to 
 
 ---
 
-*Document generated for KMR Convention project handover and specification sharing. Last updated to reflect current codebase.*
+*Document generated for KMR Convention project handover and specification sharing. Last updated to reflect current codebase (admin login refresh, edit event, expenditure event link and Other category, monthly/event-wise/yearly expenditure views).*

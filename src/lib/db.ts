@@ -35,8 +35,20 @@ async function ensureSchemaOnce(): Promise<void> {
           amount INTEGER NOT NULL,
           category VARCHAR(100) NOT NULL,
           description TEXT,
+          event_id UUID REFERENCES events(id) ON DELETE SET NULL,
+          category_other VARCHAR(200),
           created_at TIMESTAMPTZ DEFAULT NOW()
         )
+      `;
+      await sql`
+        DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'expenditures' AND column_name = 'event_id') THEN
+            ALTER TABLE expenditures ADD COLUMN event_id UUID REFERENCES events(id) ON DELETE SET NULL;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'expenditures' AND column_name = 'category_other') THEN
+            ALTER TABLE expenditures ADD COLUMN category_other VARCHAR(200);
+          END IF;
+        END $$
       `;
       await sql`
         CREATE TABLE IF NOT EXISTS comments (
@@ -145,14 +157,14 @@ export async function getExpenditures(from?: string, to?: string): Promise<Expen
   const sql = getSql();
   if (from && to) {
     const rows = await sql`
-      SELECT id, date, amount, category, description, created_at
+      SELECT id, date, amount, category, description, event_id, category_other, created_at
       FROM expenditures WHERE date >= ${from}::date AND date <= ${to}::date
       ORDER BY date DESC
     `;
     return rows as unknown as Expenditure[];
   }
   const rows = await sql`
-    SELECT id, date, amount, category, description, created_at
+    SELECT id, date, amount, category, description, event_id, category_other, created_at
     FROM expenditures ORDER BY date DESC
   `;
   return rows as unknown as Expenditure[];
@@ -163,13 +175,15 @@ export async function createExpenditure(data: {
   amount: number;
   category: string;
   description?: string;
+  event_id?: string | null;
+  category_other?: string | null;
 }): Promise<Expenditure> {
   await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
-    INSERT INTO expenditures (date, amount, category, description)
-    VALUES (${data.date}::date, ${data.amount}, ${data.category}, ${data.description ?? null})
-    RETURNING id, date, amount, category, description, created_at
+    INSERT INTO expenditures (date, amount, category, description, event_id, category_other)
+    VALUES (${data.date}::date, ${data.amount}, ${data.category}, ${data.description ?? null}, ${data.event_id ?? null}, ${data.category_other ?? null})
+    RETURNING id, date, amount, category, description, event_id, category_other, created_at
   `;
   return (rows as unknown as Expenditure[])[0];
 }

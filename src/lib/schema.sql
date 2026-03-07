@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS expenditures (
   amount INTEGER NOT NULL,
   category VARCHAR(100) NOT NULL,
   description TEXT,
+  event_id UUID REFERENCES events(id) ON DELETE SET NULL,
+  category_other VARCHAR(200),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

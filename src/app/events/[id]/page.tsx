@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { getEventById } from '@/lib/db';
 import { formatINR, formatDate } from '@/lib/format';
 import { CommentsSection } from './CommentsSection';
+import { EditEventButton } from './EditEventButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,12 +18,15 @@ export default async function EventDetailPage({
 
   return (
     <div className="space-y-8">
-      <Link
-        href="/events"
-        className="text-sm font-medium text-seagreen-dark hover:text-seagreen"
-      >
-        ← Back to events
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link
+          href="/events"
+          className="text-sm font-medium text-seagreen-dark hover:text-seagreen"
+        >
+          ← Back to events
+        </Link>
+        <EditEventButton eventId={event.id} />
+      </div>
 
       <div className="rounded-xl border border-seagreen-light bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-bold text-seagreen-dark">
