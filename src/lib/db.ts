@@ -9,8 +9,53 @@ function getSql() {
   return neon(connectionString);
 }
 
+// Run schema creation once on first use (fixes "relation does not exist" on fresh DB)
+let schemaPromise: Promise<void> | null = null;
+async function ensureSchemaOnce(): Promise<void> {
+  if (!schemaPromise) {
+    schemaPromise = (async () => {
+      const sql = getSql();
+      await sql`
+        CREATE TABLE IF NOT EXISTS events (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          date DATE NOT NULL,
+          event_type VARCHAR(100) NOT NULL,
+          contact_info VARCHAR(500),
+          price INTEGER NOT NULL,
+          diesel_included BOOLEAN NOT NULL DEFAULT false,
+          notes TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS expenditures (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          date DATE NOT NULL,
+          amount INTEGER NOT NULL,
+          category VARCHAR(100) NOT NULL,
+          description TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS comments (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+          author_name VARCHAR(200) NOT NULL,
+          author_email VARCHAR(255),
+          content TEXT NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+    })();
+  }
+  await schemaPromise;
+}
+
 // Neon returns rows array directly
 export async function getEvents(from?: string, to?: string): Promise<Event[]> {
+  await ensureSchemaOnce();
   const sql = getSql();
   if (from && to) {
     const rows = await sql`
@@ -28,6 +73,7 @@ export async function getEvents(from?: string, to?: string): Promise<Event[]> {
 }
 
 export async function getEventById(id: string): Promise<Event | null> {
+  await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
     SELECT id, date, event_type, contact_info, price, diesel_included, notes, created_at, updated_at
@@ -44,6 +90,7 @@ export async function createEvent(data: {
   diesel_included: boolean;
   notes?: string;
 }): Promise<Event> {
+  await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
     INSERT INTO events (date, event_type, contact_info, price, diesel_included, notes)
@@ -66,6 +113,7 @@ export async function updateEvent(
 ): Promise<Event | null> {
   const event = await getEventById(id);
   if (!event) return null;
+  await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
     UPDATE events SET
@@ -83,6 +131,7 @@ export async function updateEvent(
 }
 
 export async function deleteEvent(id: string): Promise<boolean> {
+  await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
     DELETE FROM events WHERE id = ${id}::uuid RETURNING id
@@ -92,6 +141,7 @@ export async function deleteEvent(id: string): Promise<boolean> {
 
 // Expenditures
 export async function getExpenditures(from?: string, to?: string): Promise<Expenditure[]> {
+  await ensureSchemaOnce();
   const sql = getSql();
   if (from && to) {
     const rows = await sql`
@@ -114,6 +164,7 @@ export async function createExpenditure(data: {
   category: string;
   description?: string;
 }): Promise<Expenditure> {
+  await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
     INSERT INTO expenditures (date, amount, category, description)
@@ -124,6 +175,7 @@ export async function createExpenditure(data: {
 }
 
 export async function deleteExpenditure(id: string): Promise<boolean> {
+  await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
     DELETE FROM expenditures WHERE id = ${id}::uuid RETURNING id
@@ -131,6 +183,7 @@ export async function deleteExpenditure(id: string): Promise<boolean> {
   return (rows as unknown as Expenditure[]).length > 0;
 }
 export async function getCommentsByEventId(eventId: string): Promise<Comment[]> {
+  await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
     SELECT id, event_id, author_name, author_email, content, created_at
@@ -145,6 +198,7 @@ export async function createComment(data: {
   author_email?: string;
   content: string;
 }): Promise<Comment> {
+  await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
     INSERT INTO comments (event_id, author_name, author_email, content)
@@ -156,6 +210,7 @@ export async function createComment(data: {
 
 // Monthly aggregates
 export async function getMonthlySummaries(year?: number): Promise<MonthlySummary[]> {
+  await ensureSchemaOnce();
   const sql = getSql();
   if (year) {
     const rows = await sql`
@@ -204,40 +259,7 @@ export async function getMonthlySummaries(year?: number): Promise<MonthlySummary
   return rows as unknown as MonthlySummary[];
 }
 
-// Ensure tables exist (idempotent)
+// Ensure tables exist (idempotent) — also used by POST /api/init
 export async function ensureSchema(): Promise<void> {
-  const sql = getSql();
-  await sql`
-    CREATE TABLE IF NOT EXISTS events (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      date DATE NOT NULL,
-      event_type VARCHAR(100) NOT NULL,
-      contact_info VARCHAR(500),
-      price INTEGER NOT NULL,
-      diesel_included BOOLEAN NOT NULL DEFAULT false,
-      notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `;
-  await sql`
-    CREATE TABLE IF NOT EXISTS expenditures (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      date DATE NOT NULL,
-      amount INTEGER NOT NULL,
-      category VARCHAR(100) NOT NULL,
-      description TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `;
-  await sql`
-    CREATE TABLE IF NOT EXISTS comments (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-      author_name VARCHAR(200) NOT NULL,
-      author_email VARCHAR(255),
-      content TEXT NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `;
+  await ensureSchemaOnce();
 }
