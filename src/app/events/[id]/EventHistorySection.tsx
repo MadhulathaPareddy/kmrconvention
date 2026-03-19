@@ -10,8 +10,9 @@ function formatChangedAt(iso: string): string {
       dateStyle: 'medium',
       timeStyle: 'short',
     });
+  } catch {
+    return iso;
   }
-  return iso;
 }
 
 function diffLabel(key: string): string {
