@@ -2,11 +2,44 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getEvents, createEvent } from '@/lib/db';
 import { isAdmin } from '@/lib/auth';
 
+function getDateRangeForFilter(filter: string | null): { from?: string; to?: string } {
+  if (!filter || filter === 'all') return {};
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const d = now.getDate();
+  const dayOfWeek = now.getDay(); // 0 = Sunday
+
+  if (filter === 'week') {
+    const start = new Date(y, m, d - dayOfWeek);
+    const end = new Date(y, m, d - dayOfWeek + 6);
+    return {
+      from: start.toISOString().slice(0, 10),
+      to: end.toISOString().slice(0, 10),
+    };
+  }
+  if (filter === 'month') {
+    const start = new Date(y, m, 1);
+    const end = new Date(y, m + 1, 0);
+    return {
+      from: start.toISOString().slice(0, 10),
+      to: end.toISOString().slice(0, 10),
+    };
+  }
+  return {};
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const from = searchParams.get('from') ?? undefined;
-    const to = searchParams.get('to') ?? undefined;
+    let from = searchParams.get('from') ?? undefined;
+    let to = searchParams.get('to') ?? undefined;
+    const filter = searchParams.get('filter');
+    if (!from && !to && filter) {
+      const range = getDateRangeForFilter(filter);
+      from = range.from;
+      to = range.to;
+    }
     const events = await getEvents(from, to);
     return NextResponse.json(events);
   } catch (e) {
@@ -22,7 +55,7 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json();
-    const { date, event_type, contact_info, price, diesel_included, notes } = body;
+    const { date, event_type, contact_info, price, diesel_type, diesel_included, notes } = body;
     if (!date || !event_type || price == null) {
       return NextResponse.json(
         { error: 'date, event_type, and price are required' },
@@ -34,7 +67,8 @@ export async function POST(req: NextRequest) {
       event_type,
       contact_info: contact_info ?? undefined,
       price: Number(price),
-      diesel_included: Boolean(diesel_included),
+      diesel_type: diesel_type === 'KMR' || diesel_type === 'GUEST' ? diesel_type : null,
+      diesel_included: diesel_included === true,
       notes: notes ?? undefined,
     });
     return NextResponse.json(event);

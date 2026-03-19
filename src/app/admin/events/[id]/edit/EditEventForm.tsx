@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import Link from 'next/link';
-import { EVENT_TYPES } from '@/lib/types';
+import { EVENT_TYPES, DIESEL_OPTIONS } from '@/lib/types';
 import type { Event } from '@/lib/types';
 
 export function EditEventForm({ event }: { event: Event }) {
@@ -15,7 +15,7 @@ export function EditEventForm({ event }: { event: Event }) {
     event_type: event.event_type ?? 'Marriage',
     contact_info: event.contact_info ?? '',
     price: event.price ?? 0,
-    diesel_included: event.diesel_included ?? false,
+    diesel_type: (event.diesel_type ?? null) as 'KMR' | 'GUEST' | null,
     notes: event.notes ?? '',
   });
 
@@ -27,7 +27,11 @@ export function EditEventForm({ event }: { event: Event }) {
       const res = await fetch(`/api/events/${event.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, price: Number(form.price) }),
+        body: JSON.stringify({
+          ...form,
+          price: Number(form.price),
+          diesel_type: form.diesel_type,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -112,17 +116,27 @@ export function EditEventForm({ event }: { event: Event }) {
             required
           />
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            id="diesel"
-            type="checkbox"
-            checked={form.diesel_included}
-            onChange={(e) => setForm((f) => ({ ...f, diesel_included: e.target.checked }))}
-            className="h-4 w-4 rounded border-neutral-300 text-seagreen"
-          />
-          <label htmlFor="diesel" className="text-sm font-medium text-neutral-700">
-            Diesel included
+        <div>
+          <label htmlFor="diesel_type" className="block text-sm font-medium text-neutral-700">
+            Incl_Diesel
           </label>
+          <select
+            id="diesel_type"
+            value={form.diesel_type ?? ''}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                diesel_type: e.target.value === 'KMR' ? 'KMR' : e.target.value === 'GUEST' ? 'GUEST' : null,
+              }))
+            }
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
+          >
+            {DIESEL_OPTIONS.map((opt) => (
+              <option key={opt.label} value={opt.value ?? ''}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label htmlFor="notes" className="block text-sm font-medium text-neutral-700">

@@ -1,13 +1,15 @@
 import Link from 'next/link';
 import { getMonthlySummaries, getEvents } from '@/lib/db';
 import { formatINR, formatDate } from '@/lib/format';
+import { isAdmin } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  const [summaries, events] = await Promise.all([
+  const [summaries, events, admin] = await Promise.all([
     getMonthlySummaries(new Date().getFullYear()),
     getEvents(),
+    isAdmin(),
   ]);
   const recentEvents = events.slice(0, 5);
   const currentMonth = summaries[0];
@@ -73,7 +75,7 @@ export default async function HomePage() {
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Event</th>
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Contact</th>
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Price</th>
-                <th className="px-4 py-3 font-medium text-seagreen-dark">Diesel</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Incl_Diesel</th>
               </tr>
             </thead>
             <tbody>
@@ -98,7 +100,13 @@ export default async function HomePage() {
                     {formatINR(ev.price)}
                   </td>
                   <td className="px-4 py-3">
-                    {ev.diesel_included ? 'Yes' : 'No'}
+                    {ev.diesel_type === 'KMR' ? (
+                      <span className="font-medium text-red-600">KMR</span>
+                    ) : ev.diesel_type === 'GUEST' ? (
+                      <span className="font-medium text-green-600">GUEST</span>
+                    ) : (
+                      '—'
+                    )}
                   </td>
                 </tr>
               ))}
@@ -107,14 +115,16 @@ export default async function HomePage() {
         </div>
       )}
 
-      <div className="flex justify-end">
-        <Link
-          href="/summary"
-          className="rounded-lg bg-seagreen-light px-4 py-2 text-sm font-medium text-seagreen-dark hover:bg-seagreen-light/80"
-        >
-          Monthly summary →
-        </Link>
-      </div>
+      {admin && (
+        <div className="flex justify-end">
+          <Link
+            href="/summary"
+            className="rounded-lg bg-seagreen-light px-4 py-2 text-sm font-medium text-seagreen-dark hover:bg-seagreen-light/80"
+          >
+            Monthly summary →
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

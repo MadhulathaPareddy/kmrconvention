@@ -36,12 +36,6 @@ export function Nav() {
           >
             Events
           </Link>
-          <Link
-            href="/summary"
-            className="text-neutral-600 transition hover:text-seagreen-dark"
-          >
-            Monthly Summary
-          </Link>
           {isAdmin === true && (
             <>
               <Link
@@ -55,6 +49,12 @@ export function Nav() {
                 className="text-seagreen-dark transition hover:text-seagreen"
               >
                 Expenditures
+              </Link>
+              <Link
+                href="/summary"
+                className="text-seagreen-dark transition hover:text-seagreen"
+              >
+                Monthly Summary
               </Link>
             </>
           )}

@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import type { Event, Expenditure, Comment, MonthlySummary } from './types';
+import type { Event, Expenditure, Comment, MonthlySummary, EventHistoryEntry, SummaryRow } from './types';
 
 function getSql() {
   const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
@@ -23,6 +23,7 @@ async function ensureSchemaOnce(): Promise<void> {
           contact_info VARCHAR(500),
           price INTEGER NOT NULL,
           diesel_included BOOLEAN NOT NULL DEFAULT false,
+          diesel_type VARCHAR(10),
           notes TEXT,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -60,13 +61,38 @@ async function ensureSchemaOnce(): Promise<void> {
           created_at TIMESTAMPTZ DEFAULT NOW()
         )
       `;
-      // Backfill: add Diesel ₹30,000 expenditure for every event that has diesel_included = true
-      // and does not already have such an expenditure. Idempotent.
+      await sql`
+        DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'events' AND column_name = 'diesel_type') THEN
+            ALTER TABLE events ADD COLUMN diesel_type VARCHAR(10);
+            UPDATE events SET diesel_type = 'KMR' WHERE diesel_included = true;
+          END IF;
+        END $$
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS event_deletions (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          event_id UUID NOT NULL,
+          event_snapshot JSONB NOT NULL,
+          expenditures_snapshot JSONB NOT NULL DEFAULT '[]',
+          reason TEXT NOT NULL,
+          deleted_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS event_history (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+          snapshot_before JSONB NOT NULL,
+          changed_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      // Backfill: add Diesel ₹30,000 for events with diesel_type = 'KMR' or 'GUEST' (or legacy diesel_included = true)
       await sql`
         INSERT INTO expenditures (date, amount, category, description, event_id)
         SELECT e.date, 30000, 'Diesel', 'Diesel (included with event)', e.id
         FROM events e
-        WHERE e.diesel_included = true
+        WHERE (e.diesel_type IN ('KMR', 'GUEST') OR (e.diesel_type IS NULL AND e.diesel_included = true))
         AND NOT EXISTS (
           SELECT 1 FROM expenditures ex
           WHERE ex.event_id = e.id AND ex.category = 'Diesel' AND ex.amount = 30000
@@ -97,33 +123,51 @@ async function ensureDieselExpenditureForEvent(
   `;
 }
 
-// Neon returns rows array directly
+// Neon returns rows array directly; normalize Event with diesel_type (diesel_included = diesel_type != null)
+function toEvent(row: Record<string, unknown>): Event {
+  const r = row as Record<string, unknown>;
+  const diesel_type = (r.diesel_type as string) || null;
+  return {
+    id: String(r.id),
+    date: String(r.date),
+    event_type: String(r.event_type),
+    contact_info: r.contact_info != null ? String(r.contact_info) : null,
+    price: Number(r.price),
+    diesel_included: diesel_type === 'KMR' || diesel_type === 'GUEST',
+    diesel_type: diesel_type === 'KMR' || diesel_type === 'GUEST' ? diesel_type : null,
+    notes: r.notes != null ? String(r.notes) : null,
+    created_at: String(r.created_at),
+    updated_at: String(r.updated_at),
+  };
+}
+
 export async function getEvents(from?: string, to?: string): Promise<Event[]> {
   await ensureSchemaOnce();
   const sql = getSql();
   if (from && to) {
     const rows = await sql`
-      SELECT id, date, event_type, contact_info, price, diesel_included, notes, created_at, updated_at
+      SELECT id, date, event_type, contact_info, price, diesel_included, diesel_type, notes, created_at, updated_at
       FROM events WHERE date >= ${from}::date AND date <= ${to}::date
       ORDER BY date ASC
     `;
-    return rows as unknown as Event[];
+    return (Array.isArray(rows) ? rows : []).map((r) => toEvent(r as Record<string, unknown>));
   }
   const rows = await sql`
-    SELECT id, date, event_type, contact_info, price, diesel_included, notes, created_at, updated_at
+    SELECT id, date, event_type, contact_info, price, diesel_included, diesel_type, notes, created_at, updated_at
     FROM events ORDER BY date DESC
   `;
-  return rows as unknown as Event[];
+  return (Array.isArray(rows) ? rows : []).map((r) => toEvent(r as Record<string, unknown>));
 }
 
 export async function getEventById(id: string): Promise<Event | null> {
   await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
-    SELECT id, date, event_type, contact_info, price, diesel_included, notes, created_at, updated_at
+    SELECT id, date, event_type, contact_info, price, diesel_included, diesel_type, notes, created_at, updated_at
     FROM events WHERE id = ${id}::uuid
   `;
-  return (rows as unknown as Event[])[0] ?? null;
+  const row = (rows as unknown[])[0];
+  return row ? toEvent(row as Record<string, unknown>) : null;
 }
 
 export async function createEvent(data: {
@@ -131,21 +175,24 @@ export async function createEvent(data: {
   event_type: string;
   contact_info?: string;
   price: number;
-  diesel_included: boolean;
+  diesel_type?: string | null;
+  diesel_included?: boolean;
   notes?: string;
 }): Promise<Event> {
   await ensureSchemaOnce();
   const sql = getSql();
+  const dieselType = data.diesel_type ?? (data.diesel_included ? 'KMR' : null);
   const rows = await sql`
-    INSERT INTO events (date, event_type, contact_info, price, diesel_included, notes)
-    VALUES (${data.date}::date, ${data.event_type}, ${data.contact_info ?? null}, ${data.price}, ${data.diesel_included}, ${data.notes ?? null})
-    RETURNING id, date, event_type, contact_info, price, diesel_included, notes, created_at, updated_at
+    INSERT INTO events (date, event_type, contact_info, price, diesel_type, notes)
+    VALUES (${data.date}::date, ${data.event_type}, ${data.contact_info ?? null}, ${data.price}, ${dieselType}, ${data.notes ?? null})
+    RETURNING id, date, event_type, contact_info, price, diesel_included, diesel_type, notes, created_at, updated_at
   `;
-  const event = (rows as unknown as Event[])[0];
-  if (event && data.diesel_included) {
+  const row = (rows as unknown[])[0];
+  const event = row ? toEvent(row as Record<string, unknown>) : null;
+  if (event && (dieselType === 'KMR' || dieselType === 'GUEST')) {
     await ensureDieselExpenditureForEvent(sql, event.id, event.date);
   }
-  return event;
+  return event!;
 }
 
 export async function updateEvent(
@@ -155,6 +202,7 @@ export async function updateEvent(
     event_type: string;
     contact_info: string;
     price: number;
+    diesel_type: string | null;
     diesel_included: boolean;
     notes: string;
   }>
@@ -163,32 +211,86 @@ export async function updateEvent(
   if (!event) return null;
   await ensureSchemaOnce();
   const sql = getSql();
+  // Record history (snapshot before update)
+  const snapshotBefore = {
+    date: event.date,
+    event_type: event.event_type,
+    contact_info: event.contact_info,
+    price: event.price,
+    diesel_type: event.diesel_type,
+    notes: event.notes,
+    updated_at: event.updated_at,
+  };
+  await sql`
+    INSERT INTO event_history (event_id, snapshot_before)
+    VALUES (${id}::uuid, ${JSON.stringify(snapshotBefore)}::jsonb)
+  `;
+  const dieselType = data.diesel_type !== undefined ? data.diesel_type : (data.diesel_included ? 'KMR' : event.diesel_type);
   const rows = await sql`
     UPDATE events SET
       date = COALESCE(${data.date ?? event.date}::date, date),
       event_type = COALESCE(${data.event_type ?? event.event_type}, event_type),
       contact_info = COALESCE(${data.contact_info ?? event.contact_info}, contact_info),
       price = COALESCE(${data.price ?? event.price}, price),
-      diesel_included = COALESCE(${data.diesel_included ?? event.diesel_included}, diesel_included),
+      diesel_type = ${dieselType ?? null},
       notes = COALESCE(${data.notes ?? event.notes}, notes),
       updated_at = NOW()
     WHERE id = ${id}::uuid
-    RETURNING id, date, event_type, contact_info, price, diesel_included, notes, created_at, updated_at
+    RETURNING id, date, event_type, contact_info, price, diesel_included, diesel_type, notes, created_at, updated_at
   `;
-  const updated = (rows as unknown as Event[])[0] ?? null;
-  if (updated && updated.diesel_included) {
+  const row = (rows as unknown[])[0];
+  const updated = row ? toEvent(row as Record<string, unknown>) : null;
+  if (updated && (updated.diesel_type === 'KMR' || updated.diesel_type === 'GUEST')) {
     await ensureDieselExpenditureForEvent(sql, updated.id, updated.date);
   }
   return updated;
 }
 
-export async function deleteEvent(id: string): Promise<boolean> {
+export async function deleteEvent(id: string, reason: string): Promise<boolean> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const event = await getEventById(id);
+  if (!event) return false;
+  const expenditures = await sql`
+    SELECT id, date, amount, category, description, event_id, category_other, created_at
+    FROM expenditures WHERE event_id = ${id}::uuid
+  `;
+  const eventSnapshot = {
+    id: event.id,
+    date: event.date,
+    event_type: event.event_type,
+    contact_info: event.contact_info,
+    price: event.price,
+    diesel_type: event.diesel_type,
+    notes: event.notes,
+    created_at: event.created_at,
+    updated_at: event.updated_at,
+  };
+  await sql`
+    INSERT INTO event_deletions (event_id, event_snapshot, expenditures_snapshot, reason)
+    VALUES (${id}::uuid, ${JSON.stringify(eventSnapshot)}::jsonb, ${JSON.stringify(Array.isArray(expenditures) ? expenditures : [])}::jsonb, ${reason})
+  `;
+  const del = await sql`DELETE FROM events WHERE id = ${id}::uuid RETURNING id`;
+  return (del as unknown[]).length > 0;
+}
+
+export async function getEventHistory(eventId: string): Promise<EventHistoryEntry[]> {
   await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
-    DELETE FROM events WHERE id = ${id}::uuid RETURNING id
+    SELECT id, event_id, snapshot_before, changed_at
+    FROM event_history WHERE event_id = ${eventId}::uuid
+    ORDER BY changed_at DESC
   `;
-  return (rows as unknown as Event[]).length > 0;
+  return (Array.isArray(rows) ? rows : []).map((r: unknown) => {
+    const row = r as Record<string, unknown>;
+    return {
+      id: String(row.id),
+      event_id: String(row.event_id),
+      snapshot_before: (row.snapshot_before as Record<string, unknown>) || {},
+      changed_at: String(row.changed_at),
+    };
+  }) as EventHistoryEntry[];
 }
 
 // Expenditures
@@ -311,6 +413,34 @@ export async function getMonthlySummaries(year?: number): Promise<MonthlySummary
     ORDER BY rev.month DESC
   `;
   return rows as unknown as MonthlySummary[];
+}
+
+/** Summary for a single date range (day/week/month/custom/all). */
+export async function getSummaryByRange(from: string, to: string, periodLabel: string): Promise<SummaryRow> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT
+      COUNT(*)::int AS event_count,
+      COALESCE(SUM(price), 0)::int AS revenue
+    FROM events WHERE date >= ${from}::date AND date <= ${to}::date
+  `;
+  const rev = (rows as unknown[])[0] as { event_count: number; revenue: number };
+  const expRows = await sql`
+    SELECT COALESCE(SUM(amount), 0)::int AS expenditure
+    FROM expenditures WHERE date >= ${from}::date AND date <= ${to}::date
+  `;
+  const exp = (expRows as unknown[])[0] as { expenditure: number };
+  const event_count = rev?.event_count ?? 0;
+  const revenue = rev?.revenue ?? 0;
+  const expenditure = exp?.expenditure ?? 0;
+  return {
+    period_label: periodLabel,
+    event_count,
+    revenue,
+    expenditure,
+    profit: revenue - expenditure,
+  };
 }
 
 // Ensure tables exist (idempotent) — also used by POST /api/init

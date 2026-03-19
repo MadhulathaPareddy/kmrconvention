@@ -1,15 +1,42 @@
 export type EventType = 'Marriage' | 'Reception' | 'Birthday' | 'Corporate' | 'Other';
 
+/** Incl_Diesel: KMR (red) or GUEST (green). null = not included. */
+export type DieselType = 'KMR' | 'GUEST' | null;
+
 export interface Event {
   id: string;
   date: string;
   event_type: EventType | string;
   contact_info: string | null;
   price: number;
-  diesel_included: boolean;
+  /** @deprecated use diesel_type */
+  diesel_included?: boolean;
+  diesel_type: DieselType;
   notes: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export const DIESEL_OPTIONS: { value: DieselType; label: string }[] = [
+  { value: null, label: '—' },
+  { value: 'KMR', label: 'KMR' },
+  { value: 'GUEST', label: 'GUEST' },
+];
+
+export interface EventDeletion {
+  id: string;
+  event_id: string;
+  event_snapshot: Record<string, unknown>;
+  expenditures_snapshot: unknown[];
+  reason: string;
+  deleted_at: string;
+}
+
+export interface EventHistoryEntry {
+  id: string;
+  event_id: string;
+  snapshot_before: Record<string, unknown>;
+  changed_at: string;
 }
 
 export interface Expenditure {
@@ -62,6 +89,15 @@ export const EVENT_TYPES: EventType[] = ['Marriage', 'Reception', 'Birthday', 'C
 export interface MonthlySummary {
   month: string;
   year: number;
+  event_count: number;
+  revenue: number;
+  expenditure: number;
+  profit: number;
+}
+
+/** For configurable summary: single row for a period (day/week/month/custom/all). */
+export interface SummaryRow {
+  period_label: string;
   event_count: number;
   revenue: number;
   expenditure: number;

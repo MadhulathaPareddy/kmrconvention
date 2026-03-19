@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { EVENT_TYPES } from '@/lib/types';
+import { EVENT_TYPES, DIESEL_OPTIONS } from '@/lib/types';
 
 export default function AddEventPage() {
   const router = useRouter();
@@ -13,7 +13,7 @@ export default function AddEventPage() {
     event_type: 'Marriage',
     contact_info: '',
     price: 200000,
-    diesel_included: false,
+    diesel_type: null as 'KMR' | 'GUEST' | null,
     notes: '',
   });
 
@@ -28,6 +28,7 @@ export default function AddEventPage() {
         body: JSON.stringify({
           ...form,
           price: Number(form.price),
+          diesel_type: form.diesel_type,
         }),
       });
       const data = await res.json();
@@ -109,17 +110,27 @@ export default function AddEventPage() {
             required
           />
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            id="diesel"
-            type="checkbox"
-            checked={form.diesel_included}
-            onChange={(e) => setForm((f) => ({ ...f, diesel_included: e.target.checked }))}
-            className="h-4 w-4 rounded border-neutral-300 text-seagreen"
-          />
-          <label htmlFor="diesel" className="text-sm font-medium text-neutral-700">
-            Diesel included
+        <div>
+          <label htmlFor="diesel_type" className="block text-sm font-medium text-neutral-700">
+            Incl_Diesel
           </label>
+          <select
+            id="diesel_type"
+            value={form.diesel_type ?? ''}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                diesel_type: e.target.value === 'KMR' ? 'KMR' : e.target.value === 'GUEST' ? 'GUEST' : null,
+              }))
+            }
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
+          >
+            {DIESEL_OPTIONS.map((opt) => (
+              <option key={opt.label} value={opt.value ?? ''}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label htmlFor="notes" className="block text-sm font-medium text-neutral-700">

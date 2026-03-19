@@ -33,6 +33,7 @@ export async function PATCH(
       event_type: body.event_type,
       contact_info: body.contact_info,
       price: body.price != null ? Number(body.price) : undefined,
+      diesel_type: body.diesel_type === 'KMR' || body.diesel_type === 'GUEST' ? body.diesel_type : body.diesel_type === null ? null : undefined,
       diesel_included: body.diesel_included,
       notes: body.notes,
     });
@@ -45,7 +46,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const admin = await isAdmin();
@@ -54,7 +55,15 @@ export async function DELETE(
   }
   try {
     const { id } = await params;
-    const ok = await deleteEvent(id);
+    const body = await req.json().catch(() => ({}));
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+    if (!reason) {
+      return NextResponse.json(
+        { error: 'Reason for deletion is required' },
+        { status: 400 }
+      );
+    }
+    const ok = await deleteEvent(id, reason);
     if (!ok) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ success: true });
   } catch (e) {
