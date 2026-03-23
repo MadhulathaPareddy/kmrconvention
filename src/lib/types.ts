@@ -50,6 +50,15 @@ export interface Expenditure {
   category_other: string | null;
 }
 
+/** Row stored when an expenditure is deleted (admin reason + snapshot). */
+export interface ExpenditureDeletion {
+  id: string;
+  expenditure_id: string;
+  snapshot: Record<string, unknown>;
+  reason: string;
+  deleted_at: string;
+}
+
 export interface Comment {
   id: string;
   event_id: string;

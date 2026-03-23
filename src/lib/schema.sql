@@ -38,3 +38,12 @@ CREATE INDEX IF NOT EXISTS idx_events_month ON events((date_trunc('month', date)
 CREATE INDEX IF NOT EXISTS idx_expenditures_date ON expenditures(date);
 CREATE INDEX IF NOT EXISTS idx_expenditures_month ON expenditures((date_trunc('month', date)));
 CREATE INDEX IF NOT EXISTS idx_comments_event_id ON comments(event_id);
+
+-- Audit: expenditure rows removed by admin (reason + snapshot)
+CREATE TABLE IF NOT EXISTS expenditure_deletions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  expenditure_id UUID NOT NULL,
+  snapshot JSONB NOT NULL,
+  reason TEXT NOT NULL,
+  deleted_at TIMESTAMPTZ DEFAULT NOW()
+);

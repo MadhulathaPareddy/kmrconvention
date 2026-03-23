@@ -1,5 +1,13 @@
 import { neon } from '@neondatabase/serverless';
-import type { Event, Expenditure, Comment, MonthlySummary, EventHistoryEntry, SummaryRow } from './types';
+import type {
+  Event,
+  Expenditure,
+  ExpenditureDeletion,
+  Comment,
+  MonthlySummary,
+  EventHistoryEntry,
+  SummaryRow,
+} from './types';
 
 function getSql() {
   const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
@@ -85,6 +93,15 @@ async function ensureSchemaOnce(): Promise<void> {
           event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
           snapshot_before JSONB NOT NULL,
           changed_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS expenditure_deletions (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          expenditure_id UUID NOT NULL,
+          snapshot JSONB NOT NULL,
+          reason TEXT NOT NULL,
+          deleted_at TIMESTAMPTZ DEFAULT NOW()
         )
       `;
       // Backfill: add Diesel ₹30,000 for events with diesel_type = 'KMR' or 'GUEST' (or legacy diesel_included = true)
@@ -330,13 +347,61 @@ export async function createExpenditure(data: {
   return (rows as unknown as Expenditure[])[0];
 }
 
-export async function deleteExpenditure(id: string): Promise<boolean> {
+export async function getExpenditureById(id: string): Promise<Expenditure | null> {
   await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
+    SELECT id, date, amount, category, description, event_id, category_other, created_at
+    FROM expenditures WHERE id = ${id}::uuid
+  `;
+  const arr = rows as unknown as Expenditure[];
+  return arr.length > 0 ? arr[0] : null;
+}
+
+/** Soft-archive then delete: snapshot + reason in expenditure_deletions. */
+export async function deleteExpenditure(id: string, reason: string): Promise<boolean> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const row = await getExpenditureById(id);
+  if (!row) return false;
+  const snapshot = {
+    id: row.id,
+    date: row.date,
+    amount: row.amount,
+    category: row.category,
+    description: row.description,
+    event_id: row.event_id,
+    category_other: row.category_other,
+    created_at: row.created_at,
+  };
+  await sql`
+    INSERT INTO expenditure_deletions (expenditure_id, snapshot, reason)
+    VALUES (${id}::uuid, ${JSON.stringify(snapshot)}::jsonb, ${reason})
+  `;
+  const del = await sql`
     DELETE FROM expenditures WHERE id = ${id}::uuid RETURNING id
   `;
-  return (rows as unknown as Expenditure[]).length > 0;
+  return (del as unknown[]).length > 0;
+}
+
+export async function getDeletedExpenditures(): Promise<ExpenditureDeletion[]> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, expenditure_id, snapshot, reason, deleted_at
+    FROM expenditure_deletions
+    ORDER BY deleted_at DESC
+  `;
+  return (Array.isArray(rows) ? rows : []).map((r: unknown) => {
+    const row = r as Record<string, unknown>;
+    return {
+      id: String(row.id),
+      expenditure_id: String(row.expenditure_id),
+      snapshot: (row.snapshot as Record<string, unknown>) || {},
+      reason: String(row.reason ?? ''),
+      deleted_at: String(row.deleted_at),
+    };
+  });
 }
 export async function getCommentsByEventId(eventId: string): Promise<Comment[]> {
   await ensureSchemaOnce();

@@ -3,7 +3,7 @@ import { deleteExpenditure } from '@/lib/db';
 import { isAdmin } from '@/lib/auth';
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const admin = await isAdmin();
@@ -12,7 +12,15 @@ export async function DELETE(
   }
   try {
     const { id } = await params;
-    const ok = await deleteExpenditure(id);
+    const body = await req.json().catch(() => ({}));
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+    if (!reason) {
+      return NextResponse.json(
+        { error: 'Reason for deletion is required' },
+        { status: 400 }
+      );
+    }
+    const ok = await deleteExpenditure(id, reason);
     if (!ok) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ success: true });
   } catch (e) {

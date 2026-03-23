@@ -1,4 +1,4 @@
-# KMR Convention — Project Specification Document
+the regular view with the link should just see the events # KMR Convention — Project Specification Document
 
 **Purpose:** Use this document to brief other people or spec tools on what was built.
 

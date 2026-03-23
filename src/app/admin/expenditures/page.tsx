@@ -13,14 +13,22 @@ export default async function AdminExpendituresPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-seagreen-dark">Expenditures</h1>
-        <Link
-          href="/"
-          className="text-sm font-medium text-seagreen-dark hover:text-seagreen"
-        >
-          ← Dashboard
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link
+            href="/admin/expenditures/deleted"
+            className="text-sm font-medium text-neutral-600 hover:text-seagreen-dark"
+          >
+            Deleted expenditures
+          </Link>
+          <Link
+            href="/"
+            className="text-sm font-medium text-seagreen-dark hover:text-seagreen"
+          >
+            ← Dashboard
+          </Link>
+        </div>
       </div>
 
       <ExpenditureForm />
