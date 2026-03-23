@@ -32,6 +32,7 @@ async function ensureSchemaOnce(): Promise<void> {
           price INTEGER NOT NULL,
           diesel_included BOOLEAN NOT NULL DEFAULT false,
           diesel_type VARCHAR(10),
+          diesel_expenditure_suppressed BOOLEAN NOT NULL DEFAULT false,
           notes TEXT,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -75,6 +76,9 @@ async function ensureSchemaOnce(): Promise<void> {
             ALTER TABLE events ADD COLUMN diesel_type VARCHAR(10);
             UPDATE events SET diesel_type = 'KMR' WHERE diesel_included = true;
           END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'events' AND column_name = 'diesel_expenditure_suppressed') THEN
+            ALTER TABLE events ADD COLUMN diesel_expenditure_suppressed BOOLEAN NOT NULL DEFAULT false;
+          END IF;
         END $$
       `;
       await sql`
@@ -104,17 +108,9 @@ async function ensureSchemaOnce(): Promise<void> {
           deleted_at TIMESTAMPTZ DEFAULT NOW()
         )
       `;
-      // Backfill: add Diesel ₹30,000 for events with diesel_type = 'KMR' or 'GUEST' (or legacy diesel_included = true)
-      await sql`
-        INSERT INTO expenditures (date, amount, category, description, event_id)
-        SELECT e.date, 30000, 'Diesel', 'Diesel (included with event)', e.id
-        FROM events e
-        WHERE (e.diesel_type IN ('KMR', 'GUEST') OR (e.diesel_type IS NULL AND e.diesel_included = true))
-        AND NOT EXISTS (
-          SELECT 1 FROM expenditures ex
-          WHERE ex.event_id = e.id AND ex.category = 'Diesel' AND ex.amount = 30000
-        )
-      `;
+      /* Diesel backfill removed from startup: it re-ran on every serverless cold start and
+       * re-inserted deleted Diesel rows. Use ensureDieselExpenditureForEvent on create/update,
+       * or run a one-time SQL migration in the dashboard if needed for legacy data. */
     })();
   }
   await schemaPromise;
@@ -128,6 +124,12 @@ async function ensureDieselExpenditureForEvent(
   eventId: string,
   eventDate: string
 ): Promise<void> {
+  const flags = await sql`
+    SELECT diesel_expenditure_suppressed FROM events WHERE id = ${eventId}::uuid
+  `;
+  const fr = (flags as unknown[])[0] as { diesel_expenditure_suppressed?: boolean } | undefined;
+  if (fr?.diesel_expenditure_suppressed === true) return;
+
   const existing = await sql`
     SELECT 1 FROM expenditures
     WHERE event_id = ${eventId}::uuid AND category = 'Diesel' AND amount = ${DIESEL_EXPENDITURE_AMOUNT}
@@ -152,6 +154,7 @@ function toEvent(row: Record<string, unknown>): Event {
     price: Number(r.price),
     diesel_included: diesel_type === 'KMR' || diesel_type === 'GUEST',
     diesel_type: diesel_type === 'KMR' || diesel_type === 'GUEST' ? diesel_type : null,
+    diesel_expenditure_suppressed: Boolean(r.diesel_expenditure_suppressed),
     notes: r.notes != null ? String(r.notes) : null,
     created_at: String(r.created_at),
     updated_at: String(r.updated_at),
@@ -163,14 +166,14 @@ export async function getEvents(from?: string, to?: string): Promise<Event[]> {
   const sql = getSql();
   if (from && to) {
     const rows = await sql`
-      SELECT id, date, event_type, contact_info, price, diesel_included, diesel_type, notes, created_at, updated_at
+      SELECT id, date, event_type, contact_info, price, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
       FROM events WHERE date >= ${from}::date AND date <= ${to}::date
       ORDER BY date ASC
     `;
     return (Array.isArray(rows) ? rows : []).map((r) => toEvent(r as Record<string, unknown>));
   }
   const rows = await sql`
-    SELECT id, date, event_type, contact_info, price, diesel_included, diesel_type, notes, created_at, updated_at
+    SELECT id, date, event_type, contact_info, price, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
     FROM events ORDER BY date DESC
   `;
   return (Array.isArray(rows) ? rows : []).map((r) => toEvent(r as Record<string, unknown>));
@@ -180,7 +183,7 @@ export async function getEventById(id: string): Promise<Event | null> {
   await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
-    SELECT id, date, event_type, contact_info, price, diesel_included, diesel_type, notes, created_at, updated_at
+    SELECT id, date, event_type, contact_info, price, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
     FROM events WHERE id = ${id}::uuid
   `;
   const row = (rows as unknown[])[0];
@@ -202,7 +205,7 @@ export async function createEvent(data: {
   const rows = await sql`
     INSERT INTO events (date, event_type, contact_info, price, diesel_type, notes)
     VALUES (${data.date}::date, ${data.event_type}, ${data.contact_info ?? null}, ${data.price}, ${dieselType}, ${data.notes ?? null})
-    RETURNING id, date, event_type, contact_info, price, diesel_included, diesel_type, notes, created_at, updated_at
+    RETURNING id, date, event_type, contact_info, price, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
   `;
   const row = (rows as unknown[])[0];
   const event = row ? toEvent(row as Record<string, unknown>) : null;
@@ -235,6 +238,7 @@ export async function updateEvent(
     contact_info: event.contact_info,
     price: event.price,
     diesel_type: event.diesel_type,
+    diesel_expenditure_suppressed: event.diesel_expenditure_suppressed,
     notes: event.notes,
     updated_at: event.updated_at,
   };
@@ -243,6 +247,15 @@ export async function updateEvent(
     VALUES (${id}::uuid, ${JSON.stringify(snapshotBefore)}::jsonb)
   `;
   const dieselType = data.diesel_type !== undefined ? data.diesel_type : (data.diesel_included ? 'KMR' : event.diesel_type);
+  const prevHadDiesel = event.diesel_type === 'KMR' || event.diesel_type === 'GUEST';
+  const newHadDiesel = dieselType === 'KMR' || dieselType === 'GUEST';
+  let nextSuppressed = event.diesel_expenditure_suppressed;
+  if (!prevHadDiesel && newHadDiesel) {
+    nextSuppressed = false;
+  }
+  if (prevHadDiesel && !newHadDiesel) {
+    nextSuppressed = false;
+  }
   const rows = await sql`
     UPDATE events SET
       date = COALESCE(${data.date ?? event.date}::date, date),
@@ -250,10 +263,11 @@ export async function updateEvent(
       contact_info = COALESCE(${data.contact_info ?? event.contact_info}, contact_info),
       price = COALESCE(${data.price ?? event.price}, price),
       diesel_type = ${dieselType ?? null},
+      diesel_expenditure_suppressed = ${nextSuppressed},
       notes = COALESCE(${data.notes ?? event.notes}, notes),
       updated_at = NOW()
     WHERE id = ${id}::uuid
-    RETURNING id, date, event_type, contact_info, price, diesel_included, diesel_type, notes, created_at, updated_at
+    RETURNING id, date, event_type, contact_info, price, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
   `;
   const row = (rows as unknown[])[0];
   const updated = row ? toEvent(row as Record<string, unknown>) : null;
@@ -279,6 +293,7 @@ export async function deleteEvent(id: string, reason: string): Promise<boolean> 
     contact_info: event.contact_info,
     price: event.price,
     diesel_type: event.diesel_type,
+    diesel_expenditure_suppressed: event.diesel_expenditure_suppressed,
     notes: event.notes,
     created_at: event.created_at,
     updated_at: event.updated_at,
@@ -378,6 +393,14 @@ export async function deleteExpenditure(id: string, reason: string): Promise<boo
     INSERT INTO expenditure_deletions (expenditure_id, snapshot, reason)
     VALUES (${id}::uuid, ${JSON.stringify(snapshot)}::jsonb, ${reason})
   `;
+  if (
+    row.event_id &&
+    row.category === 'Diesel'
+  ) {
+    await sql`
+      UPDATE events SET diesel_expenditure_suppressed = true WHERE id = ${row.event_id}::uuid
+    `;
+  }
   const del = await sql`
     DELETE FROM expenditures WHERE id = ${id}::uuid RETURNING id
   `;

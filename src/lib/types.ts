@@ -12,6 +12,8 @@ export interface Event {
   /** @deprecated use diesel_type */
   diesel_included?: boolean;
   diesel_type: DieselType;
+  /** When true, auto Diesel expenditure is not re-created (admin removed it). */
+  diesel_expenditure_suppressed: boolean;
   notes: string | null;
   created_at: string;
   updated_at: string;
