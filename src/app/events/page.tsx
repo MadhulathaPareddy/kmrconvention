@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getEvents, getEventHistoryCounts } from '@/lib/db';
+import { getEvents, getEventHistoryCounts, getLinkedExpenseTotalsByEvent } from '@/lib/db';
 import { formatINR, formatDate } from '@/lib/format';
 import { isAdmin } from '@/lib/auth';
 import { istEventsFilterRange } from '@/lib/ist';
 import { EventsFilterTabs } from './EventsFilterTabs';
 import { ViewEventChangesButton } from './ViewEventChangesButton';
+import { EventExpenditureTotalButton } from './EventExpenditureTotalButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,8 +21,11 @@ export default async function EventsPage({
   }
   const { added, filter } = await searchParams;
   const { from, to } = istEventsFilterRange(filter ?? 'all');
-  const events = await getEvents(from, to);
-  const historyCounts = await getEventHistoryCounts();
+  const [events, historyCounts, expenseTotalsByEvent] = await Promise.all([
+    getEvents(from, to),
+    getEventHistoryCounts(),
+    getLinkedExpenseTotalsByEvent(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -50,6 +54,7 @@ export default async function EventsPage({
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Kitchen</th>
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Diesel ₹</th>
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Incl_Diesel</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Expenses (linked)</th>
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Actions</th>
               </tr>
             </thead>
@@ -89,6 +94,13 @@ export default async function EventsPage({
                     ) : (
                       '—'
                     )}
+                  </td>
+                  <td className="px-4 py-3 text-neutral-800">
+                    <EventExpenditureTotalButton
+                      eventId={ev.id}
+                      eventLabel={`${formatDate(ev.date)} · ${ev.event_type}`}
+                      total={expenseTotalsByEvent.get(ev.id) ?? 0}
+                    />
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-2">

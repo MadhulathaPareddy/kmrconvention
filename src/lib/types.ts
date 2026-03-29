@@ -184,3 +184,23 @@ export interface SummaryRow {
   expenditure: number;
   profit: number;
 }
+
+/** One booking row inside a summary period (event date in range). */
+export interface SummaryEventLine {
+  event_id: string;
+  date: string;
+  event_type: string;
+  contact_info: string | null;
+  /** price + decor + kitchen + tagged royalty (income lines tied to event, dated in range). */
+  revenue: number;
+  /** Sum of expense-type expenditures linked to this event, dated in range. */
+  expenditure: number;
+  profit: number;
+}
+
+/** Summary totals plus per-event breakdown and unlinked spend in range. */
+export interface SummaryWithBreakdown extends SummaryRow {
+  event_lines: SummaryEventLine[];
+  /** Expense rows in range with no event link. */
+  unlinked_expenditure: number;
+}

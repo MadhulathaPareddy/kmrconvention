@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getMonthlySummaries, getSummaryByRange } from '@/lib/db';
+import { getMonthlySummaries, getSummaryWithBreakdown } from '@/lib/db';
 import { isAdmin } from '@/lib/auth';
 import { istYmd, istWeekRangeFrom, istMonthRangeFrom } from '@/lib/ist';
 
@@ -53,13 +53,20 @@ export async function GET(req: NextRequest) {
     if (range && range !== 'year') {
       const dateRange = getDateRangeForSummary(range, fromParam, toParam);
       if (dateRange) {
-        const row = await getSummaryByRange(
+        const row = await getSummaryWithBreakdown(
           dateRange.from,
           dateRange.to,
           dateRange.label
         );
         return NextResponse.json(row);
       }
+    }
+
+    if (range === 'custom' && (!fromParam || !toParam)) {
+      return NextResponse.json(
+        { error: 'Custom range requires from and to dates' },
+        { status: 400 }
+      );
     }
 
     const year = searchParams.get('year');

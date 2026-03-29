@@ -8,6 +8,8 @@ import type {
   MonthlySummary,
   EventHistoryEntry,
   SummaryRow,
+  SummaryWithBreakdown,
+  SummaryEventLine,
   InvestmentLedgerEntry,
   InvestmentPendingBill,
   InvestmentLedgerAuditRow,
@@ -837,6 +839,123 @@ export async function getSummaryByRange(from: string, to: string, periodLabel: s
     revenue,
     expenditure,
     profit: revenue - expenditure,
+  };
+}
+
+/** Sum of expense-type expenditures per event (all dates), for events list. */
+export async function getLinkedExpenseTotalsByEvent(): Promise<Map<string, number>> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT event_id::text AS eid, COALESCE(SUM(amount), 0)::int AS total
+    FROM expenditures
+    WHERE COALESCE(flow_type, 'expense') = 'expense'
+      AND event_id IS NOT NULL
+    GROUP BY event_id
+  `;
+  const m = new Map<string, number>();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const row = r as Record<string, unknown>;
+    m.set(String(row.eid), Number(row.total) || 0);
+  }
+  return m;
+}
+
+/** Active expense lines linked to an event (for modal). */
+export async function getExpenseLinesForEvent(eventId: string): Promise<Expenditure[]> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, date, amount, category, description, event_id, category_other, flow_type, created_at
+    FROM expenditures
+    WHERE event_id = ${eventId}::uuid
+      AND COALESCE(flow_type, 'expense') = 'expense'
+    ORDER BY date DESC, created_at DESC
+  `;
+  return (Array.isArray(rows) ? rows : []).map((r) => toExpenditure(r as Record<string, unknown>));
+}
+
+export async function getSummaryWithBreakdown(
+  from: string,
+  to: string,
+  periodLabel: string
+): Promise<SummaryWithBreakdown> {
+  const base = await getSummaryByRange(from, to, periodLabel);
+  await ensureSchemaOnce();
+  const sql = getSql();
+
+  const evRows = await sql`
+    SELECT id, date, event_type, contact_info, price, decor_royalty, kitchen_royalty
+    FROM events
+    WHERE date >= ${from}::date AND date <= ${to}::date
+    ORDER BY date ASC, id ASC
+  `;
+
+  const royRows = await sql`
+    SELECT event_id::text AS eid, COALESCE(SUM(amount), 0)::int AS s
+    FROM expenditures
+    WHERE date >= ${from}::date AND date <= ${to}::date
+      AND COALESCE(flow_type, 'expense') = 'income'
+      AND event_id IS NOT NULL
+    GROUP BY event_id
+  `;
+  const royaltyByEvent = new Map<string, number>();
+  for (const r of Array.isArray(royRows) ? royRows : []) {
+    const row = r as Record<string, unknown>;
+    royaltyByEvent.set(String(row.eid), Number(row.s) || 0);
+  }
+
+  const xRows = await sql`
+    SELECT event_id::text AS eid, COALESCE(SUM(amount), 0)::int AS s
+    FROM expenditures
+    WHERE date >= ${from}::date AND date <= ${to}::date
+      AND COALESCE(flow_type, 'expense') = 'expense'
+      AND event_id IS NOT NULL
+    GROUP BY event_id
+  `;
+  const expenseByEvent = new Map<string, number>();
+  for (const r of Array.isArray(xRows) ? xRows : []) {
+    const row = r as Record<string, unknown>;
+    expenseByEvent.set(String(row.eid), Number(row.s) || 0);
+  }
+
+  const unlRows = await sql`
+    SELECT COALESCE(SUM(amount), 0)::int AS s
+    FROM expenditures
+    WHERE date >= ${from}::date AND date <= ${to}::date
+      AND COALESCE(flow_type, 'expense') = 'expense'
+      AND event_id IS NULL
+  `;
+  const unlinked =
+    Number((unlRows as unknown as Record<string, unknown>[])[0]?.s ?? 0) || 0;
+
+  type EvRow = Record<string, unknown>;
+  const event_lines: SummaryEventLine[] = (
+    Array.isArray(evRows) ? evRows : []
+  ).map((raw) => {
+    const r = raw as EvRow;
+    const id = String(r.id);
+    const price = Number(r.price) || 0;
+    const decor = Number(r.decor_royalty) || 0;
+    const kitchen = Number(r.kitchen_royalty) || 0;
+    const tagged = royaltyByEvent.get(id) ?? 0;
+    const revenue = price + decor + kitchen + tagged;
+    const expenditure = expenseByEvent.get(id) ?? 0;
+    return {
+      event_id: id,
+      date: pgDateToYmd(r.date),
+      event_type: String(r.event_type ?? ''),
+      contact_info: r.contact_info != null ? String(r.contact_info) : null,
+      revenue,
+      expenditure,
+      profit: revenue - expenditure,
+    };
+  });
+
+  return {
+    ...base,
+    event_lines,
+    unlinked_expenditure: unlinked,
   };
 }
 
