@@ -55,9 +55,10 @@ export function SummaryClient() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-seagreen-dark">Monthly summary</h1>
+      <h1 className="text-2xl font-bold text-seagreen-dark">Summary</h1>
       <p className="text-neutral-600">
-        Events count, revenue, expenditure and profit. Choose a period to filter.
+        Event bookings, funds added (royalty / investment), and expenses for the selected period.
+        Profit is booking revenue minus expenses; fund net is funds added minus expenses.
       </p>
 
       <div className="flex flex-wrap items-center gap-2 border-b border-seagreen-light pb-4">
@@ -123,14 +124,16 @@ export function SummaryClient() {
       {loading && <p className="text-neutral-500">Loading…</p>}
 
       {!loading && data && (
-        <div className="overflow-hidden rounded-xl border border-seagreen-light bg-white shadow-sm">
-          <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto rounded-xl border border-seagreen-light bg-white shadow-sm">
+          <table className="w-full min-w-[720px] text-left text-sm">
             <thead>
               <tr className="border-b border-seagreen-light bg-seagreen-light/50">
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Period</th>
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Events</th>
-                <th className="px-4 py-3 font-medium text-seagreen-dark">Revenue</th>
-                <th className="px-4 py-3 font-medium text-seagreen-dark">Expenditure</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Event revenue</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Funds added</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Funds out</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Fund net</th>
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Profit</th>
               </tr>
             </thead>
@@ -139,7 +142,15 @@ export function SummaryClient() {
                 <td className="px-4 py-3 font-medium">{data.period_label}</td>
                 <td className="px-4 py-3">{data.event_count}</td>
                 <td className="px-4 py-3 text-green-700">{formatINR(data.revenue)}</td>
+                <td className="px-4 py-3 text-green-700">{formatINR(data.fund_inflow)}</td>
                 <td className="px-4 py-3 text-red-700">{formatINR(data.expenditure)}</td>
+                <td
+                  className={`px-4 py-3 font-medium ${
+                    data.fund_net >= 0 ? 'text-green-700' : 'text-red-700'
+                  }`}
+                >
+                  {formatINR(data.fund_net)}
+                </td>
                 <td className="px-4 py-3 font-medium text-seagreen-dark">
                   {formatINR(data.profit)}
                 </td>

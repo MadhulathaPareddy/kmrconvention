@@ -120,10 +120,13 @@ export interface MonthlySummary {
   year: number;
   event_count: number;
   revenue: number;
-  /** Sum of expense flow_type only */
+  /** Sum of expense flow_type only (funds removed) */
   expenditure: number;
   /** Sum of income flow_type (investment / royalties) */
   fund_inflow: number;
+  /** fund_inflow − expenditure (ledger cash movement) */
+  fund_net: number;
+  /** Event booking revenue − expenditure */
   profit: number;
 }
 
@@ -136,7 +139,8 @@ export interface SummaryRow {
   expenditure: number;
   /** Funds added (investment / royalties) */
   fund_inflow: number;
-  /** fund_inflow - expenditure for the period */
+  /** fund_inflow − expenditure for the period */
   fund_net: number;
+  /** Event booking revenue − expenditure */
   profit: number;
 }

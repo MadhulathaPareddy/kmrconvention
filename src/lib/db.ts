@@ -540,73 +540,93 @@ export async function createComment(data: {
   return (rows as unknown as Comment[])[0];
 }
 
-// Monthly aggregates
+// Monthly aggregates — months include any month with events and/or ledger (expenditures) activity
 export async function getMonthlySummaries(year?: number): Promise<MonthlySummary[]> {
   await ensureSchemaOnce();
   const sql = getSql();
   if (year) {
     const rows = await sql`
-      WITH rev AS (
-        SELECT date_trunc('month', date) AS month, COUNT(*) AS cnt, COALESCE(SUM(price), 0) AS rev
+      WITH all_activity AS (
+        SELECT date FROM events
+        UNION ALL
+        SELECT date FROM expenditures
+      ),
+      months AS (
+        SELECT DISTINCT date_trunc('month', date) AS month FROM all_activity
+      ),
+      rev AS (
+        SELECT date_trunc('month', date) AS month, COUNT(*)::int AS cnt, COALESCE(SUM(price), 0)::bigint AS rev
         FROM events GROUP BY date_trunc('month', date)
       ),
       exp_out AS (
-        SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0) AS tot
+        SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0)::bigint AS tot
         FROM expenditures
         WHERE COALESCE(flow_type, 'expense') = 'expense'
         GROUP BY date_trunc('month', date)
       ),
       exp_in AS (
-        SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0) AS tot
+        SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0)::bigint AS tot
         FROM expenditures
         WHERE flow_type = 'income'
         GROUP BY date_trunc('month', date)
       )
       SELECT
-        to_char(rev.month, 'YYYY-MM') AS month,
-        EXTRACT(YEAR FROM rev.month)::int AS year,
-        rev.cnt::int AS event_count,
-        rev.rev::int AS revenue,
+        to_char(m.month, 'YYYY-MM') AS month,
+        EXTRACT(YEAR FROM m.month)::int AS year,
+        COALESCE(rev.cnt, 0)::int AS event_count,
+        COALESCE(rev.rev, 0)::int AS revenue,
         COALESCE(exp_out.tot, 0)::int AS expenditure,
         COALESCE(exp_in.tot, 0)::int AS fund_inflow,
-        (rev.rev - COALESCE(exp_out.tot, 0))::int AS profit
-      FROM rev
-      LEFT JOIN exp_out ON exp_out.month = rev.month
-      LEFT JOIN exp_in ON exp_in.month = rev.month
-      WHERE date_trunc('year', rev.month) = ${`${year}-01-01`}::date
-      ORDER BY rev.month DESC
+        (COALESCE(exp_in.tot, 0) - COALESCE(exp_out.tot, 0))::int AS fund_net,
+        (COALESCE(rev.rev, 0) - COALESCE(exp_out.tot, 0))::int AS profit
+      FROM months m
+      LEFT JOIN rev ON rev.month = m.month
+      LEFT JOIN exp_out ON exp_out.month = m.month
+      LEFT JOIN exp_in ON exp_in.month = m.month
+      WHERE EXTRACT(YEAR FROM m.month) = ${year}
+      ORDER BY m.month DESC
     `;
     return rows as unknown as MonthlySummary[];
   }
   const rows = await sql`
-    WITH rev AS (
-      SELECT date_trunc('month', date) AS month, COUNT(*) AS cnt, COALESCE(SUM(price), 0) AS rev
+    WITH all_activity AS (
+      SELECT date FROM events
+      UNION ALL
+      SELECT date FROM expenditures
+    ),
+    months AS (
+      SELECT DISTINCT date_trunc('month', date) AS month FROM all_activity
+    ),
+    rev AS (
+      SELECT date_trunc('month', date) AS month, COUNT(*)::int AS cnt, COALESCE(SUM(price), 0)::bigint AS rev
       FROM events GROUP BY date_trunc('month', date)
     ),
     exp_out AS (
-      SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0) AS tot
+      SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0)::bigint AS tot
       FROM expenditures
       WHERE COALESCE(flow_type, 'expense') = 'expense'
       GROUP BY date_trunc('month', date)
     ),
     exp_in AS (
-      SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0) AS tot
+      SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0)::bigint AS tot
       FROM expenditures
       WHERE flow_type = 'income'
       GROUP BY date_trunc('month', date)
     )
     SELECT
-      to_char(rev.month, 'YYYY-MM') AS month,
-      EXTRACT(YEAR FROM rev.month)::int AS year,
-      rev.cnt::int AS event_count,
-      rev.rev::int AS revenue,
+      to_char(m.month, 'YYYY-MM') AS month,
+      EXTRACT(YEAR FROM m.month)::int AS year,
+      COALESCE(rev.cnt, 0)::int AS event_count,
+      COALESCE(rev.rev, 0)::int AS revenue,
       COALESCE(exp_out.tot, 0)::int AS expenditure,
       COALESCE(exp_in.tot, 0)::int AS fund_inflow,
-      (rev.rev - COALESCE(exp_out.tot, 0))::int AS profit
-    FROM rev
-    LEFT JOIN exp_out ON exp_out.month = rev.month
-    LEFT JOIN exp_in ON exp_in.month = rev.month
-    ORDER BY rev.month DESC
+      (COALESCE(exp_in.tot, 0) - COALESCE(exp_out.tot, 0))::int AS fund_net,
+      (COALESCE(rev.rev, 0) - COALESCE(exp_out.tot, 0))::int AS profit
+    FROM months m
+    LEFT JOIN rev ON rev.month = m.month
+    LEFT JOIN exp_out ON exp_out.month = m.month
+    LEFT JOIN exp_in ON exp_in.month = m.month
+    ORDER BY m.month DESC
   `;
   return rows as unknown as MonthlySummary[];
 }

@@ -12,7 +12,19 @@ export default async function HomePage() {
     isAdmin(),
   ]);
   const recentEvents = events.slice(0, 5);
-  const currentMonth = summaries[0];
+  const now = new Date();
+  const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const currentMonth =
+    summaries.find((s) => s.month === ym) ?? {
+      month: ym,
+      year: now.getFullYear(),
+      event_count: 0,
+      revenue: 0,
+      expenditure: 0,
+      fund_inflow: 0,
+      fund_net: 0,
+      profit: 0,
+    };
 
   return (
     <div className="space-y-8">
@@ -23,34 +35,48 @@ export default async function HomePage() {
         </p>
       </div>
 
-      {currentMonth && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-neutral-500">Events this month</p>
-            <p className="mt-1 text-2xl font-bold text-seagreen-dark">
-              {currentMonth.event_count}
-            </p>
-          </div>
-          <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-neutral-500">Monthly revenue</p>
-            <p className="mt-1 text-2xl font-bold text-green-700">
-              {formatINR(currentMonth.revenue)}
-            </p>
-          </div>
-          <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-neutral-500">Monthly expenditure</p>
-            <p className="mt-1 text-2xl font-bold text-red-700">
-              {formatINR(currentMonth.expenditure)}
-            </p>
-          </div>
-          <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-neutral-500">Profit</p>
-            <p className="mt-1 text-2xl font-bold text-seagreen-dark">
-              {formatINR(currentMonth.profit)}
-            </p>
-          </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
+          <p className="text-sm font-medium text-neutral-500">Events this month</p>
+          <p className="mt-1 text-2xl font-bold text-seagreen-dark">
+            {currentMonth.event_count}
+          </p>
         </div>
-      )}
+        <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
+          <p className="text-sm font-medium text-neutral-500">Event revenue (bookings)</p>
+          <p className="mt-1 text-2xl font-bold text-green-700">
+            {formatINR(currentMonth.revenue)}
+          </p>
+        </div>
+        <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
+          <p className="text-sm font-medium text-neutral-500">Funds added (royalty / investment)</p>
+          <p className="mt-1 text-2xl font-bold text-green-700">
+            {formatINR(currentMonth.fund_inflow)}
+          </p>
+        </div>
+        <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
+          <p className="text-sm font-medium text-neutral-500">Funds out (expenses)</p>
+          <p className="mt-1 text-2xl font-bold text-red-700">
+            {formatINR(currentMonth.expenditure)}
+          </p>
+        </div>
+        <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
+          <p className="text-sm font-medium text-neutral-500">Fund net (ledger)</p>
+          <p
+            className={`mt-1 text-2xl font-bold ${
+              currentMonth.fund_net >= 0 ? 'text-green-700' : 'text-red-700'
+            }`}
+          >
+            {formatINR(currentMonth.fund_net)}
+          </p>
+        </div>
+        <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
+          <p className="text-sm font-medium text-neutral-500">Profit (bookings − funds out)</p>
+          <p className="mt-1 text-2xl font-bold text-seagreen-dark">
+            {formatINR(currentMonth.profit)}
+          </p>
+        </div>
+      </div>
 
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-seagreen-dark">Recent events</h2>
