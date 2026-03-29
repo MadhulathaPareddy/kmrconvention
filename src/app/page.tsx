@@ -1,12 +1,37 @@
 import Link from 'next/link';
-import { getMonthlySummaries, getEvents, getUpcomingEvents } from '@/lib/db';
+import { getMonthlySummaries, getEvents } from '@/lib/db';
 import { formatINR, formatDate } from '@/lib/format';
 import { isAdmin } from '@/lib/auth';
+import type { Event } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-export default async function HomePage() {
+function calendarTodayYmd(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function currentMonthRangeYmd(): { from: string; to: string } {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const from = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  const last = new Date(y, m + 1, 0);
+  const to = `${y}-${String(m + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
+  return { from, to };
+}
+
+function isUpcomingEvent(ev: Event, todayYmd: string): boolean {
+  return ev.date >= todayYmd;
+}
+
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ period?: string }>;
+}) {
   const admin = await isAdmin();
+  const sp = await searchParams;
 
   if (admin) {
     const [summaries, events] = await Promise.all([
@@ -137,8 +162,12 @@ export default async function HomePage() {
     );
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const upcoming = await getUpcomingEvents(today);
+  const todayYmd = calendarTodayYmd();
+  const showAll = sp?.period === 'all';
+  const { from, to } = showAll
+    ? { from: '2000-01-01', to: '2100-12-31' }
+    : currentMonthRangeYmd();
+  const publicEvents = await getEvents(from, to);
 
   return (
     <div className="space-y-8">
@@ -148,21 +177,56 @@ export default async function HomePage() {
           KMR Convention Hall — Hyderabad
         </p>
         <p className="mt-2 text-sm text-neutral-500">
-          Upcoming bookings (date order). Financial details are available to admins only.
+          Events for the selected range. Orange = upcoming (today or later); green = completed (past
+          dates). No prices are shown here.
         </p>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 border-b border-seagreen-light pb-3">
+        <span className="text-sm font-medium text-neutral-600">Show:</span>
+        <Link
+          href="/?period=month"
+          className={`rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-seagreen-dark focus-visible:ring-offset-2 ${
+            !showAll
+              ? 'bg-seagreen text-white'
+              : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
+          }`}
+          aria-current={!showAll ? 'page' : undefined}
+        >
+          This month
+        </Link>
+        <Link
+          href="/?period=all"
+          className={`rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-seagreen-dark focus-visible:ring-offset-2 ${
+            showAll
+              ? 'bg-seagreen text-white'
+              : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
+          }`}
+          aria-current={showAll ? 'page' : undefined}
+        >
+          All events
+        </Link>
+      </div>
+
       <div>
-        <h2 className="text-lg font-semibold text-seagreen-dark">Upcoming events</h2>
-        {upcoming.length === 0 ? (
+        <h2 className="text-lg font-semibold text-seagreen-dark">
+          {showAll ? 'All events' : 'Events this month'}
+        </h2>
+        <p className="mt-1 text-xs text-neutral-500">
+          {!showAll
+            ? `${formatDate(from)} — ${formatDate(to)} · sorted by date`
+            : 'Every scheduled event, oldest to newest'}
+        </p>
+        {publicEvents.length === 0 ? (
           <p className="mt-4 rounded-xl border border-dashed border-seagreen-light bg-seagreen-light/50 py-12 text-center text-neutral-500">
-            No upcoming events scheduled.
+            {showAll ? 'No events on file.' : 'No events in the current calendar month.'}
           </p>
         ) : (
           <div className="mt-4 overflow-hidden rounded-xl border border-seagreen-light bg-white shadow-sm">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-seagreen-light bg-seagreen-light/50">
+                  <th className="px-4 py-3 font-medium text-seagreen-dark">Status</th>
                   <th className="px-4 py-3 font-medium text-seagreen-dark">Date</th>
                   <th className="px-4 py-3 font-medium text-seagreen-dark">Event</th>
                   <th className="px-4 py-3 font-medium text-seagreen-dark">Contact</th>
@@ -170,29 +234,55 @@ export default async function HomePage() {
                 </tr>
               </thead>
               <tbody>
-                {upcoming.map((ev) => (
-                  <tr
-                    key={ev.id}
-                    className="border-b border-neutral-100 last:border-0 hover:bg-seagreen-light/30"
-                  >
-                    <td className="px-4 py-3 font-medium text-seagreen-dark">
-                      {formatDate(ev.date)}
-                    </td>
-                    <td className="px-4 py-3">{ev.event_type}</td>
-                    <td className="px-4 py-3 text-neutral-600">
-                      {ev.contact_info || '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      {ev.diesel_type === 'KMR' ? (
-                        <span className="font-medium text-red-600">KMR</span>
-                      ) : ev.diesel_type === 'GUEST' ? (
-                        <span className="font-medium text-green-600">GUEST</span>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {publicEvents.map((ev) => {
+                  const upcoming = isUpcomingEvent(ev, todayYmd);
+                  return (
+                    <tr
+                      key={ev.id}
+                      className={`border-b border-neutral-100 last:border-0 ${
+                        upcoming
+                          ? 'bg-orange-50/90 hover:bg-orange-100/90'
+                          : 'bg-green-50/90 hover:bg-green-100/90'
+                      }`}
+                    >
+                      <td className="px-4 py-3">
+                        {upcoming ? (
+                          <span className="inline-flex rounded-full bg-orange-200 px-2.5 py-0.5 text-xs font-semibold text-orange-900">
+                            Upcoming
+                          </span>
+                        ) : (
+                          <span className="inline-flex rounded-full bg-green-200 px-2.5 py-0.5 text-xs font-semibold text-green-900">
+                            Completed
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        className={`px-4 py-3 font-medium ${
+                          upcoming ? 'text-orange-950' : 'text-green-950'
+                        }`}
+                      >
+                        {formatDate(ev.date)}
+                      </td>
+                      <td
+                        className={`px-4 py-3 ${upcoming ? 'text-orange-950' : 'text-green-950'}`}
+                      >
+                        {ev.event_type}
+                      </td>
+                      <td className="px-4 py-3 text-neutral-700">
+                        {ev.contact_info || '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        {ev.diesel_type === 'KMR' ? (
+                          <span className="font-medium text-red-600">KMR</span>
+                        ) : ev.diesel_type === 'GUEST' ? (
+                          <span className="font-medium text-green-600">GUEST</span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

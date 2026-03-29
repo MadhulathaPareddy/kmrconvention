@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getEvents, createEvent, getUpcomingEvents } from '@/lib/db';
+import { getEvents, createEvent } from '@/lib/db';
 import { isAdmin } from '@/lib/auth';
 import { toPublicEventPayload } from '@/lib/publicEvent';
 
@@ -35,8 +35,21 @@ export async function GET(req: NextRequest) {
     const admin = await isAdmin();
     const { searchParams } = new URL(req.url);
     if (!admin) {
-      const today = new Date().toISOString().slice(0, 10);
-      const events = await getUpcomingEvents(today);
+      const period = searchParams.get('period');
+      let from: string;
+      let to: string;
+      if (period === 'all') {
+        from = '2000-01-01';
+        to = '2100-12-31';
+      } else {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = now.getMonth();
+        from = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+        const last = new Date(y, m + 1, 0);
+        to = `${y}-${String(m + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
+      }
+      const events = await getEvents(from, to);
       return NextResponse.json(events.map(toPublicEventPayload));
     }
     let from = searchParams.get('from') ?? undefined;

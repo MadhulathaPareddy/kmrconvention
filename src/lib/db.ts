@@ -272,19 +272,6 @@ export async function getEvents(from?: string, to?: string): Promise<Event[]> {
   return (Array.isArray(rows) ? rows : []).map((r) => toEvent(r as Record<string, unknown>));
 }
 
-/** Events on or after `fromDate` (YYYY-MM-DD), soonest first — for public dashboard. */
-export async function getUpcomingEvents(fromDate: string, limit = 100): Promise<Event[]> {
-  await ensureSchemaOnce();
-  const sql = getSql();
-  const rows = await sql`
-    SELECT id, date, event_type, contact_info, price, decor_royalty, kitchen_royalty, diesel_amount, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
-    FROM events WHERE date >= ${fromDate}::date
-    ORDER BY date ASC
-    LIMIT ${limit}
-  `;
-  return (Array.isArray(rows) ? rows : []).map((r) => toEvent(r as Record<string, unknown>));
-}
-
 export async function getEventById(id: string): Promise<Event | null> {
   await ensureSchemaOnce();
   const sql = getSql();
