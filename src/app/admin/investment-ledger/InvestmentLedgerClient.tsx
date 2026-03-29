@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { formatINR, formatDate } from '@/lib/format';
 import { INVESTMENT_PARTNERS } from '@/lib/types';
 import type {
@@ -51,6 +51,12 @@ function buildQuery(range: RangePreset, from: string, to: string): string {
     return `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   }
   return '';
+}
+
+function defaultInvestmentPartner(name: string | null | undefined): InvestmentPartner {
+  return name && (INVESTMENT_PARTNERS as readonly string[]).includes(name)
+    ? (name as InvestmentPartner)
+    : INVESTMENT_PARTNERS[0];
 }
 
 function entryLabel(e: InvestmentLedgerEntry): string {
@@ -130,6 +136,20 @@ export function InvestmentLedgerClient() {
   const [ledgerExpanded, setLedgerExpanded] = useState(false);
   const [pendingPeriodExpanded, setPendingPeriodExpanded] = useState(false);
 
+  const [editingEntry, setEditingEntry] = useState<InvestmentLedgerEntry | null>(null);
+  const [editForm, setEditForm] = useState({
+    date: '',
+    amount: '' as string | number,
+    edit_comment: '',
+    partner_name: INVESTMENT_PARTNERS[0] as InvestmentPartner,
+    description: '',
+    external_party_name: '',
+    external_details: '',
+    expense_type: '',
+  });
+  const [editError, setEditError] = useState('');
+  const [editSubmitting, setEditSubmitting] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -179,6 +199,83 @@ export function InvestmentLedgerClient() {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [pendingModalOpen]);
+
+  useEffect(() => {
+    if (!editingEntry) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setEditingEntry(null);
+        setEditError('');
+      }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [editingEntry]);
+
+  function openEditLedger(e: InvestmentLedgerEntry) {
+    setEditError('');
+    setEditingEntry(e);
+    setEditForm({
+      date: e.date,
+      amount: e.amount,
+      edit_comment: '',
+      partner_name: defaultInvestmentPartner(e.partner_name),
+      description: e.description || '',
+      external_party_name: e.external_party_name || '',
+      external_details: e.external_details || '',
+      expense_type: e.expense_type || '',
+    });
+  }
+
+  async function submitEditLedger(ev: FormEvent) {
+    ev.preventDefault();
+    if (!editingEntry) return;
+    if (!editForm.edit_comment.trim()) {
+      setEditError('Comment is required for this edit');
+      return;
+    }
+    const amt = Number(editForm.amount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setEditError('Amount must be greater than 0');
+      return;
+    }
+    setEditError('');
+    setEditSubmitting(true);
+    try {
+      const body: Record<string, unknown> = {
+        edit_comment: editForm.edit_comment.trim(),
+        date: editForm.date,
+        amount: amt,
+      };
+      const kind = editingEntry.entry_kind;
+      if (kind === 'partner_investment') {
+        body.partner_name = editForm.partner_name;
+        body.description = editForm.description.trim() || null;
+      } else if (kind === 'external_borrow') {
+        body.external_party_name = editForm.external_party_name.trim();
+        body.external_details = editForm.external_details.trim();
+      } else if (kind === 'expense' || kind === 'pending_payment') {
+        body.expense_type = editForm.expense_type.trim();
+        body.description = editForm.description.trim();
+      }
+      const res = await fetch(`/api/investment-ledger/entries/${editingEntry.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setEditError(json.error || 'Update failed');
+        return;
+      }
+      setEditingEntry(null);
+      await load();
+    } catch {
+      setEditError('Update failed');
+    } finally {
+      setEditSubmitting(false);
+    }
+  }
 
   async function openAudit(title: string, refType: string, refId: string) {
     setAuditModal({ title, refType, refId, rows: null, loading: true });
@@ -856,13 +953,13 @@ export function InvestmentLedgerClient() {
                       <th className="px-3 py-2 font-medium text-seagreen-dark">Type</th>
                       <th className="px-3 py-2 font-medium text-seagreen-dark">Detail</th>
                       <th className="px-3 py-2 font-medium text-seagreen-dark">Amount</th>
-                      <th className="px-3 py-2 font-medium text-seagreen-dark">History</th>
+                      <th className="px-3 py-2 font-medium text-seagreen-dark">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {entryCount === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-3 py-8 text-center text-neutral-500">
+                        <td colSpan={6} className="px-3 py-8 text-center text-neutral-500">
                           No ledger rows in this period.
                         </td>
                       </tr>
@@ -886,15 +983,24 @@ export function InvestmentLedgerClient() {
                             {formatINR(e.amount)}
                           </td>
                           <td className="px-3 py-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                openAudit(`Ledger line · ${formatDate(e.date)}`, 'ledger_entry', e.id)
-                              }
-                              className="text-seagreen-dark underline hover:text-seagreen focus:outline-none focus-visible:ring-2 focus-visible:ring-seagreen"
-                            >
-                              View
-                            </button>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1">
+                              <button
+                                type="button"
+                                onClick={() => openEditLedger(e)}
+                                className="text-seagreen-dark underline hover:text-seagreen focus:outline-none focus-visible:ring-2 focus-visible:ring-seagreen"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openAudit(`Ledger line · ${formatDate(e.date)}`, 'ledger_entry', e.id)
+                                }
+                                className="text-seagreen-dark underline hover:text-seagreen focus:outline-none focus-visible:ring-2 focus-visible:ring-seagreen"
+                              >
+                                History
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -985,6 +1091,202 @@ export function InvestmentLedgerClient() {
                 ))}
               </ul>
             )}
+          </div>
+        </div>
+      )}
+
+      {editingEntry && (
+        <div
+          className="fixed inset-0 z-[62] flex items-center justify-center bg-black/50 p-4"
+          role="presentation"
+          onClick={() => {
+            setEditingEntry(null);
+            setEditError('');
+          }}
+        >
+          <div
+            className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-ledger-title"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h3 id="edit-ledger-title" className="text-lg font-semibold text-seagreen-dark">
+                Edit ledger entry
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingEntry(null);
+                  setEditError('');
+                }}
+                className="rounded-md px-2 py-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-seagreen"
+                aria-label="Close edit dialog"
+              >
+                Close
+              </button>
+            </div>
+            <p className="text-sm text-neutral-600">
+              {entryLabel(editingEntry)} · {editingEntry.direction === 'in' ? '+' : '−'}
+              {formatINR(editingEntry.amount)}
+            </p>
+            <form onSubmit={submitEditLedger} className="mt-4 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-neutral-600">
+                  Comment for this edit <span className="text-red-600">*</span>
+                </label>
+                <textarea
+                  value={editForm.edit_comment}
+                  onChange={(ev) =>
+                    setEditForm((f) => ({ ...f, edit_comment: ev.target.value }))
+                  }
+                  className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                  rows={3}
+                  placeholder="Why you are changing this row (stored in audit log)"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-neutral-600">Date</label>
+                <input
+                  type="date"
+                  value={editForm.date}
+                  onChange={(ev) => setEditForm((f) => ({ ...f, date: ev.target.value }))}
+                  className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-neutral-600">Amount (₹)</label>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={editForm.amount}
+                  onChange={(ev) => setEditForm((f) => ({ ...f, amount: ev.target.value }))}
+                  className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                  required
+                />
+              </div>
+              {editingEntry.entry_kind === 'partner_investment' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-600">Partner</label>
+                    <select
+                      value={editForm.partner_name}
+                      onChange={(ev) =>
+                        setEditForm((f) => ({
+                          ...f,
+                          partner_name: ev.target.value as InvestmentPartner,
+                        }))
+                      }
+                      className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                    >
+                      {INVESTMENT_PARTNERS.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-600">Notes</label>
+                    <input
+                      type="text"
+                      value={editForm.description}
+                      onChange={(ev) =>
+                        setEditForm((f) => ({ ...f, description: ev.target.value }))
+                      }
+                      className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                    />
+                  </div>
+                </>
+              )}
+              {editingEntry.entry_kind === 'external_borrow' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-600">
+                      External party
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.external_party_name}
+                      onChange={(ev) =>
+                        setEditForm((f) => ({ ...f, external_party_name: ev.target.value }))
+                      }
+                      className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-600">Details</label>
+                    <textarea
+                      value={editForm.external_details}
+                      onChange={(ev) =>
+                        setEditForm((f) => ({ ...f, external_details: ev.target.value }))
+                      }
+                      className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                      rows={3}
+                      required
+                    />
+                  </div>
+                </>
+              )}
+              {(editingEntry.entry_kind === 'expense' ||
+                editingEntry.entry_kind === 'pending_payment') && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-600">
+                      Expense type
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.expense_type}
+                      onChange={(ev) =>
+                        setEditForm((f) => ({ ...f, expense_type: ev.target.value }))
+                      }
+                      className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-600">
+                      Description
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.description}
+                      onChange={(ev) =>
+                        setEditForm((f) => ({ ...f, description: ev.target.value }))
+                      }
+                      className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                      required
+                    />
+                  </div>
+                </>
+              )}
+              {editError && <p className="text-sm text-red-600">{editError}</p>}
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit"
+                  disabled={editSubmitting}
+                  className="rounded-md bg-seagreen px-4 py-2 text-sm text-white hover:bg-seagreen-dark disabled:opacity-50"
+                >
+                  Save changes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingEntry(null);
+                    setEditError('');
+                  }}
+                  className="rounded-md border border-neutral-200 px-4 py-2 text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

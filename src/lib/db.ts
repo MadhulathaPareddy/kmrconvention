@@ -771,6 +771,104 @@ export function isValidInvestmentPartner(p: string): p is InvestmentPartner {
   return (INVESTMENT_PARTNERS as readonly string[]).includes(p);
 }
 
+export async function getInvestmentLedgerEntryById(id: string): Promise<InvestmentLedgerEntry | null> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, date, direction, entry_kind, amount, partner_name, external_party_name,
+           external_details, expense_type, description, pending_bill_id, created_at
+    FROM investment_ledger_entries WHERE id = ${id}::uuid
+  `;
+  const arr = rows as unknown[];
+  return arr.length > 0 ? toInvestmentLedgerEntry(arr[0] as Record<string, unknown>) : null;
+}
+
+export async function updateInvestmentLedgerEntry(
+  id: string,
+  data: {
+    date: string;
+    amount: number;
+    description?: string | null;
+    partner_name?: string | null;
+    external_party_name?: string | null;
+    external_details?: string | null;
+    expense_type?: string | null;
+  },
+  editComment: string
+): Promise<InvestmentLedgerEntry | null> {
+  const trimmedComment = editComment?.trim() ?? '';
+  if (!trimmedComment) {
+    throw new Error('Comment is required when editing a ledger entry');
+  }
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const existing = await getInvestmentLedgerEntryById(id);
+  if (!existing) return null;
+
+  const amount = Math.max(0, Math.floor(Number(data.amount) || 0));
+  if (amount <= 0) throw new Error('Amount must be greater than 0');
+
+  const date = data.date?.trim() || existing.date;
+  let partner_name = existing.partner_name;
+  let external_party_name = existing.external_party_name;
+  let external_details = existing.external_details;
+  let expense_type = existing.expense_type;
+  let description = existing.description;
+
+  const kind = existing.entry_kind;
+  if (kind === 'partner_investment') {
+    const p = data.partner_name != null ? String(data.partner_name).trim() : existing.partner_name;
+    if (!p || !isValidInvestmentPartner(p)) {
+      throw new Error('Valid partner is required');
+    }
+    partner_name = p;
+    description = data.description !== undefined ? (data.description?.trim() || null) : existing.description;
+  } else if (kind === 'external_borrow') {
+    const name = (data.external_party_name ?? existing.external_party_name ?? '').trim();
+    const det = (data.external_details ?? existing.external_details ?? '').trim();
+    if (!name || !det) throw new Error('External party name and details are required');
+    external_party_name = name;
+    external_details = det;
+    description = det;
+  } else if (kind === 'expense' || kind === 'pending_payment') {
+    const et = (data.expense_type ?? existing.expense_type ?? '').trim();
+    if (!et) throw new Error('Expense type is required');
+    expense_type = et;
+    const desc = data.description !== undefined ? data.description?.trim() || null : existing.description;
+    if (!desc) throw new Error('Description is required');
+    description = desc;
+  }
+
+  await sql`
+    UPDATE investment_ledger_entries SET
+      date = ${date}::date,
+      amount = ${amount},
+      partner_name = ${partner_name},
+      external_party_name = ${external_party_name},
+      external_details = ${external_details},
+      expense_type = ${expense_type},
+      description = ${description}
+    WHERE id = ${id}::uuid
+  `;
+
+  const summaryParts = [
+    `date ${existing.date} → ${date}`,
+    `amount ₹${existing.amount} → ₹${amount}`,
+  ];
+  if (kind === 'partner_investment') {
+    summaryParts.push(`partner ${existing.partner_name ?? '—'} → ${partner_name}`);
+  }
+  await insertInvestmentAudit(sql, {
+    ref_type: 'ledger_entry',
+    ref_id: id,
+    action: 'edit_ledger_entry',
+    note: `${trimmedComment}\n\n(${summaryParts.join('; ')})`,
+    amount,
+  });
+
+  return getInvestmentLedgerEntryById(id);
+}
+
 export async function getInvestmentLedgerEntries(
   from?: string,
   to?: string
