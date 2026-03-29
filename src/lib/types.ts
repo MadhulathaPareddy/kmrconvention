@@ -115,6 +115,54 @@ export const INCOME_CATEGORIES: IncomeCategory[] = [
 
 export const EVENT_TYPES: EventType[] = ['Marriage', 'Reception', 'Birthday', 'Corporate', 'Other'];
 
+/** Equity partners for investment ledger (funds in). */
+export const INVESTMENT_PARTNERS = ['Dinesh', 'Shashi', 'Santhosh', 'Bharath'] as const;
+export type InvestmentPartner = (typeof INVESTMENT_PARTNERS)[number];
+
+export type InvestmentEntryKind =
+  | 'partner_investment'
+  | 'external_borrow'
+  | 'expense'
+  | 'pending_payment';
+
+export interface InvestmentLedgerEntry {
+  id: string;
+  date: string;
+  direction: 'in' | 'out';
+  entry_kind: InvestmentEntryKind;
+  amount: number;
+  partner_name: string | null;
+  external_party_name: string | null;
+  external_details: string | null;
+  expense_type: string | null;
+  description: string | null;
+  pending_bill_id: string | null;
+  created_at: string;
+}
+
+export interface InvestmentPendingBill {
+  id: string;
+  date_incurred: string;
+  expense_type: string;
+  description: string | null;
+  total_amount: number;
+  amount_paid: number;
+  amount_remaining: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvestmentLedgerAuditRow {
+  id: string;
+  created_at: string;
+  ref_type: string;
+  ref_id: string;
+  action: string;
+  note: string | null;
+  paid_by: string | null;
+  amount: number | null;
+}
+
 export interface MonthlySummary {
   month: string;
   year: number;

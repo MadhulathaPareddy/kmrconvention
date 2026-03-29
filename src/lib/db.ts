@@ -8,7 +8,13 @@ import type {
   MonthlySummary,
   EventHistoryEntry,
   SummaryRow,
+  InvestmentLedgerEntry,
+  InvestmentPendingBill,
+  InvestmentLedgerAuditRow,
+  InvestmentPartner,
+  InvestmentEntryKind,
 } from './types';
+import { INVESTMENT_PARTNERS } from './types';
 
 function getSql() {
   const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
@@ -126,6 +132,46 @@ async function ensureSchemaOnce(): Promise<void> {
           deleted_at TIMESTAMPTZ DEFAULT NOW()
         )
       `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS investment_pending_bills (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          date_incurred DATE NOT NULL,
+          expense_type VARCHAR(200) NOT NULL,
+          description TEXT,
+          total_amount INTEGER NOT NULL,
+          amount_paid INTEGER NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS investment_ledger_entries (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          date DATE NOT NULL,
+          direction VARCHAR(10) NOT NULL,
+          entry_kind VARCHAR(40) NOT NULL,
+          amount INTEGER NOT NULL,
+          partner_name VARCHAR(50),
+          external_party_name TEXT,
+          external_details TEXT,
+          expense_type VARCHAR(200),
+          description TEXT,
+          pending_bill_id UUID REFERENCES investment_pending_bills(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS investment_ledger_audit (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          ref_type VARCHAR(30) NOT NULL,
+          ref_id UUID NOT NULL,
+          action VARCHAR(40) NOT NULL,
+          note TEXT,
+          paid_by VARCHAR(200),
+          amount INTEGER
+        )
+      `;
       /* Diesel backfill removed from startup: it re-ran on every serverless cold start and
        * re-inserted deleted Diesel rows. Use syncDieselExpenditureForEvent on create/update,
        * or run a one-time SQL migration in the dashboard if needed for legacy data. */
@@ -162,6 +208,21 @@ async function syncDieselExpenditureForEvent(
     INSERT INTO expenditures (date, amount, category, description, event_id, flow_type)
     VALUES (${eventDate}::date, ${dieselAmount}, 'Diesel', ${AUTO_DIESEL_DESCRIPTION}, ${eventId}::uuid, 'expense')
   `;
+}
+
+/** Diesel line is best-effort: event row must not fail if this errors (avoids false “failed” after insert). */
+async function safeSyncDieselExpenditureForEvent(
+  sql: ReturnType<typeof getSql>,
+  eventId: string,
+  eventDate: string,
+  dieselAmount: number,
+  hasDieselInclusion: boolean
+): Promise<void> {
+  try {
+    await syncDieselExpenditureForEvent(sql, eventId, eventDate, dieselAmount, hasDieselInclusion);
+  } catch (e) {
+    console.error('safeSyncDieselExpenditureForEvent: event saved but diesel expenditure sync failed', e);
+  }
 }
 
 // Neon returns rows array directly; normalize Event with diesel_type (diesel_included = diesel_type != null)
@@ -251,7 +312,7 @@ export async function createEvent(data: {
   const row = (rows as unknown[])[0];
   const event = row ? toEvent(row as Record<string, unknown>) : null;
   if (event) {
-    await syncDieselExpenditureForEvent(sql, event.id, event.date, event.diesel_amount, hasDiesel);
+    await safeSyncDieselExpenditureForEvent(sql, event.id, event.date, event.diesel_amount, hasDiesel);
   }
   return event!;
 }
@@ -330,7 +391,7 @@ export async function updateEvent(
   const row = (rows as unknown[])[0];
   const updated = row ? toEvent(row as Record<string, unknown>) : null;
   if (updated) {
-    await syncDieselExpenditureForEvent(
+    await safeSyncDieselExpenditureForEvent(
       sql,
       updated.id,
       updated.date,
@@ -670,6 +731,346 @@ export async function getSummaryByRange(from: string, to: string, periodLabel: s
     fund_net,
     profit: revenue - expenditure,
   };
+}
+
+// --- Investment ledger (admin-only feature; separate from hall expenditures) ---
+
+function toInvestmentLedgerEntry(r: Record<string, unknown>): InvestmentLedgerEntry {
+  const k = String(r.entry_kind ?? '');
+  const kind = (
+    ['partner_investment', 'external_borrow', 'expense', 'pending_payment'].includes(k) ? k : 'expense'
+  ) as InvestmentEntryKind;
+  return {
+    id: String(r.id),
+    date: String(r.date),
+    direction: r.direction === 'in' ? 'in' : 'out',
+    entry_kind: kind,
+    amount: num(r, 'amount'),
+    partner_name: r.partner_name != null ? String(r.partner_name) : null,
+    external_party_name: r.external_party_name != null ? String(r.external_party_name) : null,
+    external_details: r.external_details != null ? String(r.external_details) : null,
+    expense_type: r.expense_type != null ? String(r.expense_type) : null,
+    description: r.description != null ? String(r.description) : null,
+    pending_bill_id: r.pending_bill_id != null ? String(r.pending_bill_id) : null,
+    created_at: String(r.created_at),
+  };
+}
+
+function toInvestmentPendingBill(r: Record<string, unknown>): InvestmentPendingBill {
+  const total = num(r, 'total_amount');
+  const paid = num(r, 'amount_paid');
+  return {
+    id: String(r.id),
+    date_incurred: String(r.date_incurred),
+    expense_type: String(r.expense_type ?? ''),
+    description: r.description != null ? String(r.description) : null,
+    total_amount: total,
+    amount_paid: paid,
+    amount_remaining: Math.max(0, total - paid),
+    created_at: String(r.created_at),
+    updated_at: String(r.updated_at),
+  };
+}
+
+async function insertInvestmentAudit(
+  sql: ReturnType<typeof getSql>,
+  row: {
+    ref_type: string;
+    ref_id: string;
+    action: string;
+    note?: string | null;
+    paid_by?: string | null;
+    amount?: number | null;
+  }
+): Promise<void> {
+  await sql`
+    INSERT INTO investment_ledger_audit (ref_type, ref_id, action, note, paid_by, amount)
+    VALUES (
+      ${row.ref_type},
+      ${row.ref_id}::uuid,
+      ${row.action},
+      ${row.note ?? null},
+      ${row.paid_by ?? null},
+      ${row.amount ?? null}
+    )
+  `;
+}
+
+export function isValidInvestmentPartner(p: string): p is InvestmentPartner {
+  return (INVESTMENT_PARTNERS as readonly string[]).includes(p);
+}
+
+export async function getInvestmentLedgerEntries(
+  from?: string,
+  to?: string
+): Promise<InvestmentLedgerEntry[]> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  if (from && to) {
+    const rows = await sql`
+      SELECT id, date, direction, entry_kind, amount, partner_name, external_party_name,
+             external_details, expense_type, description, pending_bill_id, created_at
+      FROM investment_ledger_entries
+      WHERE date >= ${from}::date AND date <= ${to}::date
+      ORDER BY date DESC, created_at DESC
+    `;
+    return (Array.isArray(rows) ? rows : []).map((r) =>
+      toInvestmentLedgerEntry(r as Record<string, unknown>)
+    );
+  }
+  const rows = await sql`
+    SELECT id, date, direction, entry_kind, amount, partner_name, external_party_name,
+           external_details, expense_type, description, pending_bill_id, created_at
+    FROM investment_ledger_entries
+    ORDER BY date DESC, created_at DESC
+  `;
+  return (Array.isArray(rows) ? rows : []).map((r) =>
+    toInvestmentLedgerEntry(r as Record<string, unknown>)
+  );
+}
+
+/** All bills that still have a balance (for modal + global obligations). */
+export async function getInvestmentOpenPendingBills(): Promise<InvestmentPendingBill[]> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
+    FROM investment_pending_bills
+    WHERE amount_paid < total_amount
+    ORDER BY date_incurred DESC, created_at DESC
+  `;
+  return (Array.isArray(rows) ? rows : []).map((r) =>
+    toInvestmentPendingBill(r as Record<string, unknown>)
+  );
+}
+
+export async function getInvestmentPendingBillsInRange(
+  from: string,
+  to: string
+): Promise<InvestmentPendingBill[]> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
+    FROM investment_pending_bills
+    WHERE date_incurred >= ${from}::date AND date_incurred <= ${to}::date
+    ORDER BY date_incurred DESC, created_at DESC
+  `;
+  return (Array.isArray(rows) ? rows : []).map((r) =>
+    toInvestmentPendingBill(r as Record<string, unknown>)
+  );
+}
+
+export async function getInvestmentAuditLog(
+  refType: string,
+  refId: string
+): Promise<InvestmentLedgerAuditRow[]> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, created_at, ref_type, ref_id, action, note, paid_by, amount
+    FROM investment_ledger_audit
+    WHERE ref_type = ${refType} AND ref_id = ${refId}::uuid
+    ORDER BY created_at ASC
+  `;
+  return (Array.isArray(rows) ? rows : []).map((r) => {
+    const row = r as Record<string, unknown>;
+    return {
+      id: String(row.id),
+      created_at: String(row.created_at),
+      ref_type: String(row.ref_type ?? ''),
+      ref_id: String(row.ref_id),
+      action: String(row.action ?? ''),
+      note: row.note != null ? String(row.note) : null,
+      paid_by: row.paid_by != null ? String(row.paid_by) : null,
+      amount: row.amount != null ? Number(row.amount) : null,
+    };
+  });
+}
+
+export async function createInvestmentPartnerIn(data: {
+  date: string;
+  partner: InvestmentPartner;
+  amount: number;
+  description?: string | null;
+}): Promise<InvestmentLedgerEntry> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const rows = await sql`
+    INSERT INTO investment_ledger_entries (
+      date, direction, entry_kind, amount, partner_name, description
+    )
+    VALUES (
+      ${data.date}::date, 'in', 'partner_investment', ${data.amount},
+      ${data.partner}, ${data.description ?? null}
+    )
+    RETURNING id, date, direction, entry_kind, amount, partner_name, external_party_name,
+              external_details, expense_type, description, pending_bill_id, created_at
+  `;
+  const entry = toInvestmentLedgerEntry((rows as unknown[])[0] as Record<string, unknown>);
+  await insertInvestmentAudit(sql, {
+    ref_type: 'ledger_entry',
+    ref_id: entry.id,
+    action: 'create_partner_investment',
+    note: data.description ?? `Partner ${data.partner} — ₹${data.amount}`,
+    amount: data.amount,
+  });
+  return entry;
+}
+
+export async function createInvestmentExternalBorrowIn(data: {
+  date: string;
+  external_party_name: string;
+  external_details: string;
+  amount: number;
+}): Promise<InvestmentLedgerEntry> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const rows = await sql`
+    INSERT INTO investment_ledger_entries (
+      date, direction, entry_kind, amount, external_party_name, external_details, description
+    )
+    VALUES (
+      ${data.date}::date, 'in', 'external_borrow', ${data.amount},
+      ${data.external_party_name.trim()}, ${data.external_details.trim()},
+      ${data.external_details.trim()}
+    )
+    RETURNING id, date, direction, entry_kind, amount, partner_name, external_party_name,
+              external_details, expense_type, description, pending_bill_id, created_at
+  `;
+  const entry = toInvestmentLedgerEntry((rows as unknown[])[0] as Record<string, unknown>);
+  await insertInvestmentAudit(sql, {
+    ref_type: 'ledger_entry',
+    ref_id: entry.id,
+    action: 'create_external_borrow',
+    note: `${data.external_party_name.trim()}: ${data.external_details.trim()}`,
+    amount: data.amount,
+  });
+  return entry;
+}
+
+export async function createInvestmentExpense(data: {
+  date: string;
+  expense_type: string;
+  description: string;
+  amount: number;
+  is_pending: boolean;
+}): Promise<{ entry?: InvestmentLedgerEntry; pending_bill?: InvestmentPendingBill }> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  if (data.is_pending) {
+    const billRows = await sql`
+      INSERT INTO investment_pending_bills (date_incurred, expense_type, description, total_amount, amount_paid)
+      VALUES (
+        ${data.date}::date,
+        ${data.expense_type.trim()},
+        ${data.description.trim()},
+        ${data.amount},
+        0
+      )
+      RETURNING id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
+    `;
+    const bill = toInvestmentPendingBill((billRows as unknown[])[0] as Record<string, unknown>);
+    await insertInvestmentAudit(sql, {
+      ref_type: 'pending_bill',
+      ref_id: bill.id,
+      action: 'create_pending_bill',
+      note: `${data.expense_type}: ${data.description} (total ₹${data.amount})`,
+      amount: data.amount,
+    });
+    return { pending_bill: bill };
+  }
+  const rows = await sql`
+    INSERT INTO investment_ledger_entries (
+      date, direction, entry_kind, amount, expense_type, description
+    )
+    VALUES (
+      ${data.date}::date, 'out', 'expense', ${data.amount},
+      ${data.expense_type.trim()}, ${data.description.trim()}
+    )
+    RETURNING id, date, direction, entry_kind, amount, partner_name, external_party_name,
+              external_details, expense_type, description, pending_bill_id, created_at
+  `;
+  const entry = toInvestmentLedgerEntry((rows as unknown[])[0] as Record<string, unknown>);
+  await insertInvestmentAudit(sql, {
+    ref_type: 'ledger_entry',
+    ref_id: entry.id,
+    action: 'create_expense',
+    note: `${data.expense_type}: ${data.description}`,
+    amount: data.amount,
+  });
+  return { entry };
+}
+
+export async function payInvestmentPendingBill(data: {
+  pending_bill_id: string;
+  date: string;
+  amount: number;
+  paid_by: string;
+  description: string;
+}): Promise<{ entry: InvestmentLedgerEntry; bill: InvestmentPendingBill }> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const existing = await sql`
+    SELECT id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
+    FROM investment_pending_bills WHERE id = ${data.pending_bill_id}::uuid
+  `;
+  const arr = existing as unknown[];
+  if (arr.length === 0) {
+    throw new Error('Pending bill not found');
+  }
+  const billRow = arr[0] as Record<string, unknown>;
+  const total = num(billRow, 'total_amount');
+  const paid = num(billRow, 'amount_paid');
+  const remaining = total - paid;
+  if (data.amount <= 0) throw new Error('Amount must be positive');
+  if (data.amount > remaining) {
+    throw new Error(`Payment exceeds remaining balance (₹${remaining})`);
+  }
+  const newPaid = paid + data.amount;
+  const rows = await sql`
+    INSERT INTO investment_ledger_entries (
+      date, direction, entry_kind, amount, expense_type, description, pending_bill_id
+    )
+    VALUES (
+      ${data.date}::date, 'out', 'pending_payment', ${data.amount},
+      'Pending bill payment',
+      ${data.description.trim()},
+      ${data.pending_bill_id}::uuid
+    )
+    RETURNING id, date, direction, entry_kind, amount, partner_name, external_party_name,
+              external_details, expense_type, description, pending_bill_id, created_at
+  `;
+  const entry = toInvestmentLedgerEntry((rows as unknown[])[0] as Record<string, unknown>);
+  await sql`
+    UPDATE investment_pending_bills
+    SET amount_paid = ${newPaid}, updated_at = NOW()
+    WHERE id = ${data.pending_bill_id}::uuid
+  `;
+  await insertInvestmentAudit(sql, {
+    ref_type: 'pending_bill',
+    ref_id: data.pending_bill_id,
+    action: 'record_payment',
+    note: data.description.trim(),
+    paid_by: data.paid_by.trim(),
+    amount: data.amount,
+  });
+  await insertInvestmentAudit(sql, {
+    ref_type: 'ledger_entry',
+    ref_id: entry.id,
+    action: 'pending_payment_out',
+    note: `Toward bill: ${data.description.trim()} (paid by ${data.paid_by.trim()})`,
+    paid_by: data.paid_by.trim(),
+    amount: data.amount,
+  });
+  const after = await sql`
+    SELECT id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
+    FROM investment_pending_bills WHERE id = ${data.pending_bill_id}::uuid
+  `;
+  const afterArr = after as unknown[];
+  if (afterArr.length === 0) throw new Error('Pending bill missing after update');
+  const bill = toInvestmentPendingBill(afterArr[0] as Record<string, unknown>);
+  return { entry, bill };
 }
 
 // Ensure tables exist (idempotent) — also used by POST /api/init

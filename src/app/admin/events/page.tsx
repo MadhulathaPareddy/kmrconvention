@@ -1,11 +1,12 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { EVENT_TYPES, DIESEL_OPTIONS } from '@/lib/types';
 
 export default function AddEventPage() {
   const router = useRouter();
+  const submitGuard = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState({
@@ -22,7 +23,9 @@ export default function AddEventPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitGuard.current) return;
     setError('');
+    submitGuard.current = true;
     setSubmitting(true);
     try {
       const res = await fetch('/api/events', {
@@ -34,14 +37,26 @@ export default function AddEventPage() {
           diesel_type: form.diesel_type,
         }),
       });
-      const data = await res.json();
+      let data: { error?: string } = {};
+      try {
+        const text = await res.text();
+        data = text ? (JSON.parse(text) as { error?: string }) : {};
+      } catch {
+        setError('Invalid response from server. Check the events list — the event may still have been saved.');
+        return;
+      }
       if (!res.ok) {
         setError(data.error || 'Failed to add event');
         return;
       }
       router.push('/events?added=1');
       router.refresh();
+    } catch {
+      setError(
+        'Network error. If you are online, check the events list — the event may have been saved already.'
+      );
     } finally {
+      submitGuard.current = false;
       setSubmitting(false);
     }
   }

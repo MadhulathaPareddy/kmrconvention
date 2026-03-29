@@ -51,6 +51,12 @@ export function Nav() {
                 Expenditures
               </Link>
               <Link
+                href="/admin/investment-ledger"
+                className="text-seagreen-dark transition hover:text-seagreen"
+              >
+                Investment ledger
+              </Link>
+              <Link
                 href="/admin/expenditures/deleted"
                 className="text-neutral-500 transition hover:text-seagreen-dark"
                 title="Deleted expenditure audit log"
