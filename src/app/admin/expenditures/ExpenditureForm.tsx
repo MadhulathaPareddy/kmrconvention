@@ -43,7 +43,6 @@ export function ExpenditureForm() {
       setForm((f) => ({
         ...f,
         category: 'Royalty — Decor',
-        event_id: '',
         category_other: '',
       }));
     }
@@ -87,7 +86,7 @@ export function ExpenditureForm() {
           amount: Number(form.amount),
           category: form.category,
           description: form.description.trim() || undefined,
-          event_id: flow === 'expense' && form.event_id ? form.event_id : null,
+          event_id: form.event_id ? form.event_id : null,
           category_other:
             form.category === 'Other' ? form.category_other.trim() : undefined,
           flow_type: flow,
@@ -143,9 +142,9 @@ export function ExpenditureForm() {
       <p className="mb-4 text-xs text-neutral-600">
         {flow === 'expense'
           ? 'Money leaving the hall account — shown as expense in lists. Same categories as before.'
-          : 'Decor/kitchen royalty or other inflows — shown in green. Reason is required.'}
+          : 'Decor/kitchen royalty or other inflows — shown in green. Reason is required. Optionally tag an event so this amount counts toward Summary revenue for that booking (in the month of the date above).'}
       </p>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <div>
           <label htmlFor="ex-date" className="block text-xs font-medium text-neutral-600">
             Date *
@@ -159,26 +158,26 @@ export function ExpenditureForm() {
             required
           />
         </div>
-        {flow === 'expense' && (
-          <div>
-            <label htmlFor="ex-event" className="block text-xs font-medium text-neutral-600">
-              Link to event
-            </label>
-            <select
-              id="ex-event"
-              value={form.event_id}
-              onChange={(e) => setForm((f) => ({ ...f, event_id: e.target.value }))}
-              className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2 text-sm"
-            >
-              <option value="">No event / current month</option>
-              {events.map((ev) => (
-                <option key={ev.id} value={ev.id}>
-                  {formatDate(ev.date)} — {ev.event_type}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div>
+          <label htmlFor="ex-event" className="block text-xs font-medium text-neutral-600">
+            {flow === 'expense' ? 'Link to event' : 'Tag event (optional)'}
+          </label>
+          <select
+            id="ex-event"
+            value={form.event_id}
+            onChange={(e) => setForm((f) => ({ ...f, event_id: e.target.value }))}
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2 text-sm"
+          >
+            <option value="">
+              {flow === 'expense' ? 'No event / current month' : 'None — not tied to a booking'}
+            </option>
+            {events.map((ev) => (
+              <option key={ev.id} value={ev.id}>
+                {formatDate(ev.date)} — {ev.event_type}
+              </option>
+            ))}
+          </select>
+        </div>
         <div>
           <label htmlFor="ex-amount" className="block text-xs font-medium text-neutral-600">
             Amount (₹) *

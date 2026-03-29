@@ -68,7 +68,7 @@ export default async function HomePage({
             </p>
           </div>
           <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-neutral-500">Event revenue</p>
+            <p className="text-sm font-medium text-neutral-500">Revenue</p>
             <p className="mt-1 text-2xl font-bold text-green-700">
               {formatINR(currentMonth.revenue)}
             </p>
@@ -155,7 +155,7 @@ export default async function HomePage({
             href="/summary"
             className="rounded-lg bg-seagreen-light px-4 py-2 text-sm font-medium text-seagreen-dark hover:bg-seagreen-light/80"
           >
-            Monthly summary →
+            Summary →
           </Link>
         </div>
       </div>

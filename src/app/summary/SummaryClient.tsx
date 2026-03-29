@@ -57,8 +57,9 @@ export function SummaryClient() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-seagreen-dark">Summary</h1>
       <p className="text-neutral-600">
-        Event count, booking revenue, and recorded expenses for the selected period. Profit is revenue
-        minus expenses. Royalties are tracked under Expenditures, not here.
+        Event count, revenue (booking prices plus any <strong>tag-linked</strong> royalty from Expenditures,
+        counted in the month of that royalty line), and recorded expenses. Profit is revenue minus
+        expenses.
       </p>
 
       <div className="flex flex-wrap items-center gap-2 border-b border-seagreen-light pb-4">

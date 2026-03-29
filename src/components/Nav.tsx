@@ -69,7 +69,7 @@ export function Nav() {
                 href="/summary"
                 className="text-seagreen-dark transition hover:text-seagreen"
               >
-                Monthly Summary
+                Summary
               </Link>
             </>
           )}

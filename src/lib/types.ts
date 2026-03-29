@@ -166,14 +166,15 @@ export interface MonthlySummary {
   month: string;
   year: number;
   event_count: number;
+  /** Booking prices in month + income expenditures tagged to an event (by line date). */
   revenue: number;
   /** Sum of expense-type expenditures only */
   expenditure: number;
-  /** Event booking revenue − expenditure */
+  /** Revenue − expenditure */
   profit: number;
 }
 
-/** For configurable summary: single row for a period (day/week/month/custom/all). Events + expenses only. */
+/** Single-row summary for a day/week/month/custom/all range (admin /summary). */
 export interface SummaryRow {
   period_label: string;
   event_count: number;

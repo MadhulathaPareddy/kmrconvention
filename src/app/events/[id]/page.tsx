@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
-import { getEventById } from '@/lib/db';
+import { getEventById, getTaggedIncomeSumForEvent } from '@/lib/db';
 import { formatINR, formatDate } from '@/lib/format';
 import { isAdmin } from '@/lib/auth';
 import { CommentsSection } from './CommentsSection';
@@ -22,6 +22,12 @@ export default async function EventDetailPage({
   const { id } = await params;
   const event = await getEventById(id);
   if (!event) notFound();
+  const taggedRoyaltyIncome = await getTaggedIncomeSumForEvent(event.id);
+  const totalRevenue =
+    event.price +
+    event.decor_royalty +
+    event.kitchen_royalty +
+    taggedRoyaltyIncome;
 
   return (
     <div className="space-y-8">
@@ -68,6 +74,23 @@ export default async function EventDetailPage({
           <div>
             <dt className="text-xs font-medium uppercase text-neutral-500">Kitchen royalty</dt>
             <dd className="mt-0.5 font-medium">{formatINR(event.kitchen_royalty)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium uppercase text-neutral-500">
+              Royalties (funds added, tagged here)
+            </dt>
+            <dd className="mt-0.5 font-medium text-green-800">
+              {formatINR(taggedRoyaltyIncome)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium uppercase text-neutral-500">Total revenue</dt>
+            <dd className="mt-0.5 text-lg font-semibold text-green-800">
+              {formatINR(totalRevenue)}
+            </dd>
+            <dd className="mt-1 text-xs text-neutral-500">
+              Booking price + decor + kitchen + tagged royalty from Expenditures.
+            </dd>
           </div>
           <div>
             <dt className="text-xs font-medium uppercase text-neutral-500">Incl_Diesel</dt>

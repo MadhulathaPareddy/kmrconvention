@@ -192,8 +192,9 @@ export function ExpenditureViews({
       <div className="rounded-xl border border-seagreen-light bg-white p-4 shadow-sm">
         <h3 className="text-sm font-semibold text-seagreen-dark">Fund balance (active rows only)</h3>
         <p className="mt-1 text-xs text-neutral-500">
-          Event booking revenue is on the Dashboard. Totals below exclude deleted rows; removed entries still
-          appear in the tables with reason. Royalties are recorded as funds added.
+          Booking revenue (and tagged royalty totals for Summary) are on the Dashboard / Summary. Totals
+          below exclude deleted rows; removed entries still appear in the tables with reason. Royalties are
+          funds added; tag an event on a royalty line to count it toward that event and Summary revenue.
         </p>
         <div className="mt-3 flex flex-wrap gap-6 text-sm">
           <div>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getExpenditures, createExpenditure } from '@/lib/db';
+import { getExpenditures, createExpenditure, getEventById } from '@/lib/db';
 import { isAdmin } from '@/lib/auth';
 import { INCOME_CATEGORIES } from '@/lib/types';
 
@@ -47,7 +47,19 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
+      if (event_id) {
+        const ev = await getEventById(String(event_id));
+        if (!ev) {
+          return NextResponse.json({ error: 'Linked event not found' }, { status: 400 });
+        }
+      }
     } else {
+      if (event_id) {
+        const ev = await getEventById(String(event_id));
+        if (!ev) {
+          return NextResponse.json({ error: 'Linked event not found' }, { status: 400 });
+        }
+      }
       if (!event_id && !description?.trim()) {
         return NextResponse.json(
           { error: 'Description is required when the expense is not linked to an event' },
@@ -66,7 +78,7 @@ export async function POST(req: NextRequest) {
       amount: Number(amount),
       category,
       description: description?.trim() || undefined,
-      event_id: flow === 'income' ? null : event_id || null,
+      event_id: event_id ? String(event_id) : null,
       category_other: category === 'Other' ? (category_other?.trim() || undefined) : undefined,
       flow_type: flow,
     });

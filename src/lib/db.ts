@@ -496,7 +496,7 @@ function toExpenditure(row: Record<string, unknown>): Expenditure {
   const ft = (r.flow_type as string) || 'expense';
   return {
     id: String(r.id),
-    date: String(r.date),
+    date: pgDateToYmd(r.date),
     amount: Number(r.amount) || 0,
     category: String(r.category ?? ''),
     description: r.description != null ? String(r.description) : null,
@@ -639,28 +639,63 @@ export async function createComment(data: {
   return (rows as unknown as Comment[])[0];
 }
 
-// Monthly aggregates — events + expense outflows only (no royalty/income in summary)
+/** Tag-linked royalty (income expenditures with event_id); counted toward that event and monthly revenue. */
+export async function getTaggedIncomeSumForEvent(eventId: string): Promise<number> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT COALESCE(SUM(amount), 0)::int AS s
+    FROM expenditures
+    WHERE event_id = ${eventId}::uuid AND COALESCE(flow_type, 'expense') = 'income'
+  `;
+  const r = (rows as unknown[])[0] as { s: number } | undefined;
+  return r?.s ?? 0;
+}
+
+// Monthly aggregates — event booking prices + tag-linked royalty income (by expenditure month); expenses = outflows only
 export async function getMonthlySummaries(year?: number): Promise<MonthlySummary[]> {
   await ensureSchemaOnce();
   const sql = getSql();
   if (year) {
     const rows = await sql`
       WITH all_activity AS (
-        SELECT date FROM events
+        SELECT date FROM events WHERE EXTRACT(YEAR FROM date) = ${year}
         UNION ALL
-        SELECT date FROM expenditures WHERE COALESCE(flow_type, 'expense') = 'expense'
+        SELECT date FROM expenditures
+        WHERE COALESCE(flow_type, 'expense') = 'expense' AND EXTRACT(YEAR FROM date) = ${year}
+        UNION ALL
+        SELECT date FROM expenditures
+        WHERE COALESCE(flow_type, 'expense') = 'income' AND event_id IS NOT NULL
+          AND EXTRACT(YEAR FROM date) = ${year}
       ),
       months AS (
         SELECT DISTINCT date_trunc('month', date) AS month FROM all_activity
       ),
+      event_rev AS (
+        SELECT date_trunc('month', date) AS month, COUNT(*)::int AS cnt, COALESCE(SUM(price), 0)::bigint AS booking
+        FROM events
+        WHERE EXTRACT(YEAR FROM date) = ${year}
+        GROUP BY 1
+      ),
+      tagged_income_rev AS (
+        SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0)::bigint AS royalty
+        FROM expenditures
+        WHERE COALESCE(flow_type, 'expense') = 'income' AND event_id IS NOT NULL
+          AND EXTRACT(YEAR FROM date) = ${year}
+        GROUP BY 1
+      ),
       rev AS (
-        SELECT date_trunc('month', date) AS month, COUNT(*)::int AS cnt, COALESCE(SUM(price), 0)::bigint AS rev
-        FROM events GROUP BY date_trunc('month', date)
+        SELECT COALESCE(e.month, t.month) AS month,
+          COALESCE(e.cnt, 0)::int AS cnt,
+          (COALESCE(e.booking, 0) + COALESCE(t.royalty, 0))::bigint AS rev
+        FROM event_rev e
+        FULL OUTER JOIN tagged_income_rev t ON e.month = t.month
       ),
       exp_out AS (
         SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0)::bigint AS tot
         FROM expenditures
         WHERE COALESCE(flow_type, 'expense') = 'expense'
+          AND EXTRACT(YEAR FROM date) = ${year}
         GROUP BY date_trunc('month', date)
       )
       SELECT
@@ -673,7 +708,6 @@ export async function getMonthlySummaries(year?: number): Promise<MonthlySummary
       FROM months m
       LEFT JOIN rev ON rev.month = m.month
       LEFT JOIN exp_out ON exp_out.month = m.month
-      WHERE EXTRACT(YEAR FROM m.month) = ${year}
       ORDER BY m.month DESC
     `;
     return rows as unknown as MonthlySummary[];
@@ -683,13 +717,30 @@ export async function getMonthlySummaries(year?: number): Promise<MonthlySummary
       SELECT date FROM events
       UNION ALL
       SELECT date FROM expenditures WHERE COALESCE(flow_type, 'expense') = 'expense'
+      UNION ALL
+      SELECT date FROM expenditures
+      WHERE COALESCE(flow_type, 'expense') = 'income' AND event_id IS NOT NULL
     ),
     months AS (
       SELECT DISTINCT date_trunc('month', date) AS month FROM all_activity
     ),
+    event_rev AS (
+      SELECT date_trunc('month', date) AS month, COUNT(*)::int AS cnt, COALESCE(SUM(price), 0)::bigint AS booking
+      FROM events
+      GROUP BY 1
+    ),
+    tagged_income_rev AS (
+      SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0)::bigint AS royalty
+      FROM expenditures
+      WHERE COALESCE(flow_type, 'expense') = 'income' AND event_id IS NOT NULL
+      GROUP BY 1
+    ),
     rev AS (
-      SELECT date_trunc('month', date) AS month, COUNT(*)::int AS cnt, COALESCE(SUM(price), 0)::bigint AS rev
-      FROM events GROUP BY date_trunc('month', date)
+      SELECT COALESCE(e.month, t.month) AS month,
+        COALESCE(e.cnt, 0)::int AS cnt,
+        (COALESCE(e.booking, 0) + COALESCE(t.royalty, 0))::bigint AS rev
+      FROM event_rev e
+      FULL OUTER JOIN tagged_income_rev t ON e.month = t.month
     ),
     exp_out AS (
       SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0)::bigint AS tot
@@ -717,10 +768,20 @@ export async function getSummaryByRange(from: string, to: string, periodLabel: s
   await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
-    SELECT
-      COUNT(*)::int AS event_count,
-      COALESCE(SUM(price), 0)::int AS revenue
-    FROM events WHERE date >= ${from}::date AND date <= ${to}::date
+    WITH ev AS (
+      SELECT
+        COUNT(*)::int AS event_count,
+        COALESCE(SUM(price), 0)::int AS booking
+      FROM events WHERE date >= ${from}::date AND date <= ${to}::date
+    ),
+    tagged AS (
+      SELECT COALESCE(SUM(amount), 0)::int AS royalty
+      FROM expenditures
+      WHERE date >= ${from}::date AND date <= ${to}::date
+        AND COALESCE(flow_type, 'expense') = 'income' AND event_id IS NOT NULL
+    )
+    SELECT ev.event_count, (ev.booking + tagged.royalty)::int AS revenue
+    FROM ev CROSS JOIN tagged
   `;
   const rev = (rows as unknown[])[0] as { event_count: number; revenue: number };
   const expRows = await sql`
