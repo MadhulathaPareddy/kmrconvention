@@ -172,6 +172,24 @@ async function ensureSchemaOnce(): Promise<void> {
           amount INTEGER
         )
       `;
+      await sql`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'investment_pending_bills'
+              AND column_name = 'source_ledger_entry_id'
+          ) THEN
+            ALTER TABLE investment_pending_bills
+            ADD COLUMN source_ledger_entry_id UUID REFERENCES investment_ledger_entries(id) ON DELETE SET NULL;
+          END IF;
+        END $$
+      `;
+      await sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS investment_pending_bills_one_source_ledger_entry
+        ON investment_pending_bills (source_ledger_entry_id)
+        WHERE source_ledger_entry_id IS NOT NULL
+      `;
       /* Diesel backfill removed from startup: it re-ran on every serverless cold start and
        * re-inserted deleted Diesel rows. Use syncDieselExpenditureForEvent on create/update,
        * or run a one-time SQL migration in the dashboard if needed for legacy data. */
@@ -783,6 +801,110 @@ export async function getInvestmentLedgerEntryById(id: string): Promise<Investme
   return arr.length > 0 ? toInvestmentLedgerEntry(arr[0] as Record<string, unknown>) : null;
 }
 
+/** Pending bill linked to a funds-spent (expense) row, if any. */
+export async function getInvestmentLinkedPendingBillForExpense(
+  expenseLedgerEntryId: string
+): Promise<InvestmentPendingBill | null> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
+    FROM investment_pending_bills
+    WHERE source_ledger_entry_id = ${expenseLedgerEntryId}::uuid
+    LIMIT 1
+  `;
+  const arr = rows as unknown[];
+  return arr.length > 0 ? toInvestmentPendingBill(arr[0] as Record<string, unknown>) : null;
+}
+
+async function syncExpenseLinkedPendingFromEdit(
+  sql: ReturnType<typeof getSql>,
+  expenseEntryId: string,
+  opts: {
+    date_incurred: string;
+    expense_type: string;
+    description: string;
+    pending_remaining: number;
+    auditNote: string;
+  }
+): Promise<void> {
+  const remaining = Math.max(0, Math.floor(Number(opts.pending_remaining) || 0));
+  const existingRows = await sql`
+    SELECT id, total_amount, amount_paid
+    FROM investment_pending_bills
+    WHERE source_ledger_entry_id = ${expenseEntryId}::uuid
+    LIMIT 1
+  `;
+  const existingArr = existingRows as unknown[];
+  const existing = existingArr.length > 0 ? (existingArr[0] as Record<string, unknown>) : null;
+
+  if (remaining === 0) {
+    if (!existing) return;
+    const paid = num(existing, 'amount_paid');
+    if (paid > 0) {
+      throw new Error(
+        `This expense has a linked bill with payments (₹${paid} recorded). You cannot clear pending until remaining is settled or adjusted via payments.`
+      );
+    }
+    const bid = String(existing.id);
+    await sql`DELETE FROM investment_pending_bills WHERE id = ${bid}::uuid`;
+    await insertInvestmentAudit(sql, {
+      ref_type: 'pending_bill',
+      ref_id: bid,
+      action: 'delete_pending_bill',
+      note: opts.auditNote,
+    });
+    return;
+  }
+
+  const paid = existing ? num(existing, 'amount_paid') : 0;
+  const newTotal = paid + remaining;
+  if (newTotal < paid) throw new Error('Invalid pending remaining');
+
+  if (existing) {
+    const bid = String(existing.id);
+    await sql`
+      UPDATE investment_pending_bills SET
+        date_incurred = ${opts.date_incurred}::date,
+        expense_type = ${opts.expense_type.trim()},
+        description = ${opts.description.trim()},
+        total_amount = ${newTotal},
+        updated_at = NOW()
+      WHERE id = ${bid}::uuid
+    `;
+    await insertInvestmentAudit(sql, {
+      ref_type: 'pending_bill',
+      ref_id: bid,
+      action: 'edit_pending_bill',
+      note: `${opts.auditNote} (open remaining ₹${remaining}; bill total ₹${newTotal})`,
+      amount: remaining,
+    });
+  } else {
+    const billRows = await sql`
+      INSERT INTO investment_pending_bills (
+        date_incurred, expense_type, description, total_amount, amount_paid, source_ledger_entry_id
+      )
+      VALUES (
+        ${opts.date_incurred}::date,
+        ${opts.expense_type.trim()},
+        ${opts.description.trim()},
+        ${remaining},
+        0,
+        ${expenseEntryId}::uuid
+      )
+      RETURNING id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
+    `;
+    const bill = toInvestmentPendingBill((billRows as unknown[])[0] as Record<string, unknown>);
+    await insertInvestmentAudit(sql, {
+      ref_type: 'pending_bill',
+      ref_id: bill.id,
+      action: 'create_pending_bill',
+      note: `${opts.auditNote} (linked on edit; open ₹${remaining})`,
+      amount: remaining,
+    });
+  }
+}
+
 export async function updateInvestmentLedgerEntry(
   id: string,
   data: {
@@ -793,6 +915,8 @@ export async function updateInvestmentLedgerEntry(
     external_party_name?: string | null;
     external_details?: string | null;
     expense_type?: string | null;
+    /** Open balance still owed on linked bill; omit to leave pending unchanged (expense rows only). */
+    pending_remaining?: number;
   },
   editComment: string
 ): Promise<InvestmentLedgerEntry | null> {
@@ -865,6 +989,16 @@ export async function updateInvestmentLedgerEntry(
     note: `${trimmedComment}\n\n(${summaryParts.join('; ')})`,
     amount,
   });
+
+  if (kind === 'expense' && data.pending_remaining !== undefined) {
+    await syncExpenseLinkedPendingFromEdit(sql, id, {
+      date_incurred: date,
+      expense_type: expense_type ?? '',
+      description: description ?? '',
+      pending_remaining: data.pending_remaining,
+      auditNote: trimmedComment,
+    });
+  }
 
   return getInvestmentLedgerEntryById(id);
 }
@@ -1060,17 +1194,34 @@ export async function createInvestmentExpense(data: {
   }
 
   if (pending > 0) {
-    const billRows = await sql`
-      INSERT INTO investment_pending_bills (date_incurred, expense_type, description, total_amount, amount_paid)
-      VALUES (
-        ${data.date}::date,
-        ${data.expense_type.trim()},
-        ${data.description.trim()},
-        ${pending},
-        0
-      )
-      RETURNING id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
-    `;
+    const sourceId =
+      entries.length > 0 ? entries[entries.length - 1]!.id : null;
+    const billRows = sourceId
+      ? await sql`
+          INSERT INTO investment_pending_bills (
+            date_incurred, expense_type, description, total_amount, amount_paid, source_ledger_entry_id
+          )
+          VALUES (
+            ${data.date}::date,
+            ${data.expense_type.trim()},
+            ${data.description.trim()},
+            ${pending},
+            0,
+            ${sourceId}::uuid
+          )
+          RETURNING id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
+        `
+      : await sql`
+          INSERT INTO investment_pending_bills (date_incurred, expense_type, description, total_amount, amount_paid)
+          VALUES (
+            ${data.date}::date,
+            ${data.expense_type.trim()},
+            ${data.description.trim()},
+            ${pending},
+            0
+          )
+          RETURNING id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
+        `;
     const bill = toInvestmentPendingBill((billRows as unknown[])[0] as Record<string, unknown>);
     await insertInvestmentAudit(sql, {
       ref_type: 'pending_bill',
@@ -1180,14 +1331,27 @@ export async function createInvestmentPendingFromExpenseLedger(data: {
     description =
       description.replace(/\s*\(paid portion ₹[\d,]+ of ₹[\d,]+\)\s*$/i, '').trim() || null;
   }
+  const dup = await sql`
+    SELECT id FROM investment_pending_bills
+    WHERE source_ledger_entry_id = ${data.ledger_entry_id}::uuid
+    LIMIT 1
+  `;
+  if ((dup as unknown[]).length > 0) {
+    throw new Error(
+      'This expense already has a linked pending bill. Edit the ledger line to change open pending.'
+    );
+  }
   const billRows = await sql`
-    INSERT INTO investment_pending_bills (date_incurred, expense_type, description, total_amount, amount_paid)
+    INSERT INTO investment_pending_bills (
+      date_incurred, expense_type, description, total_amount, amount_paid, source_ledger_entry_id
+    )
     VALUES (
       ${dateInc}::date,
       ${expense_type},
       ${description},
       ${pending},
-      0
+      0,
+      ${data.ledger_entry_id}::uuid
     )
     RETURNING id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
   `;

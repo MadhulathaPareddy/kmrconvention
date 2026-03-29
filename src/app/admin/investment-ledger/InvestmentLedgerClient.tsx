@@ -53,6 +53,16 @@ function buildQuery(range: RangePreset, from: string, to: string): string {
   return '';
 }
 
+function summaryScopeLabel(range: RangePreset, from: string, to: string): string {
+  if (range === 'all') return 'All time';
+  if (range === 'month') return 'This month';
+  if (range === 'week') return 'This week';
+  if (range === 'year') return 'This year';
+  if (range === 'custom' && from && to) return `${from} → ${to}`;
+  if (range === 'custom') return 'Custom (set dates)';
+  return '';
+}
+
 function defaultInvestmentPartner(name: string | null | undefined): InvestmentPartner {
   return name && (INVESTMENT_PARTNERS as readonly string[]).includes(name)
     ? (name as InvestmentPartner)
@@ -166,9 +176,12 @@ export function InvestmentLedgerClient() {
     external_party_name: '',
     external_details: '',
     expense_type: '',
+    /** Open balance on bill linked to this expense (funds spent only). */
+    pending_remaining: '' as string | number,
   });
   const [editError, setEditError] = useState('');
   const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editPendingReady, setEditPendingReady] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -257,6 +270,36 @@ export function InvestmentLedgerClient() {
     return () => document.removeEventListener('keydown', onKey);
   }, [editingEntry]);
 
+  useEffect(() => {
+    if (!editingEntry) {
+      setEditPendingReady(true);
+      return;
+    }
+    if (editingEntry.entry_kind !== 'expense') {
+      setEditPendingReady(true);
+      return;
+    }
+    setEditPendingReady(false);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/investment-ledger/entries/${editingEntry.id}`);
+        const json = await res.json();
+        if (cancelled) return;
+        const bill = res.ok ? (json.linkedPendingBill as InvestmentPendingBill | null) : null;
+        const rem = bill != null ? bill.amount_remaining : 0;
+        setEditForm((f) => ({ ...f, pending_remaining: rem }));
+      } catch {
+        if (!cancelled) setEditForm((f) => ({ ...f, pending_remaining: 0 }));
+      } finally {
+        if (!cancelled) setEditPendingReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [editingEntry]);
+
   function openEditLedger(e: InvestmentLedgerEntry) {
     setEditError('');
     setEditingEntry(e);
@@ -269,6 +312,7 @@ export function InvestmentLedgerClient() {
       external_party_name: e.external_party_name || '',
       external_details: e.external_details || '',
       expense_type: e.expense_type || '',
+      pending_remaining: e.entry_kind === 'expense' ? 0 : '',
     });
   }
 
@@ -277,6 +321,10 @@ export function InvestmentLedgerClient() {
     if (!editingEntry) return;
     if (!editForm.edit_comment.trim()) {
       setEditError('Comment is required for this edit');
+      return;
+    }
+    if (editingEntry.entry_kind === 'expense' && !editPendingReady) {
+      setEditError('Still loading linked pending amount…');
       return;
     }
     const amt = Number(editForm.amount);
@@ -299,7 +347,16 @@ export function InvestmentLedgerClient() {
       } else if (kind === 'external_borrow') {
         body.external_party_name = editForm.external_party_name.trim();
         body.external_details = editForm.external_details.trim();
-      } else if (kind === 'expense' || kind === 'pending_payment') {
+      } else if (kind === 'expense') {
+        body.expense_type = editForm.expense_type.trim();
+        body.description = editForm.description.trim();
+        const pr = Number(editForm.pending_remaining);
+        if (!Number.isFinite(pr) || pr < 0) {
+          setEditError('Open pending must be 0 or more');
+          return;
+        }
+        body.pending_remaining = Math.floor(pr);
+      } else if (kind === 'pending_payment') {
         body.expense_type = editForm.expense_type.trim();
         body.description = editForm.description.trim();
       }
@@ -553,6 +610,7 @@ export function InvestmentLedgerClient() {
   const openPendingCount = data?.openPending?.length ?? 0;
   const pendingInPeriodCount = data?.pendingInRange?.length ?? 0;
   const entryCount = data?.entries?.length ?? 0;
+  const scopeLabel = summaryScopeLabel(range, from, to);
 
   return (
     <div className="space-y-8">
@@ -624,18 +682,28 @@ export function InvestmentLedgerClient() {
       {s && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border border-seagreen-light bg-white p-4 shadow-sm">
-            <p className="text-xs font-medium text-neutral-500">Funds in (period)</p>
+            <p className="text-xs font-medium text-neutral-500">
+              Funds in <span className="font-normal text-neutral-400">({scopeLabel})</span>
+            </p>
             <p className="mt-1 text-xl font-semibold text-green-700">{formatINR(s.total_in)}</p>
           </div>
           <div className="rounded-xl border border-seagreen-light bg-white p-4 shadow-sm">
-            <p className="text-xs font-medium text-neutral-500">Funds spent (period)</p>
+            <p className="text-xs font-medium text-neutral-500">
+              Funds spent <span className="font-normal text-neutral-400">({scopeLabel})</span>
+            </p>
             <p className="mt-1 text-xl font-semibold text-red-700">{formatINR(s.total_out)}</p>
           </div>
           <div className="rounded-xl border border-seagreen-light bg-white p-4 shadow-sm">
-            <p className="text-xs font-medium text-neutral-500">Net (period)</p>
+            <p className="text-xs font-medium text-neutral-500">
+              Net <span className="font-normal text-neutral-400">({scopeLabel})</span>
+            </p>
             <p
               className={`mt-1 text-xl font-semibold ${s.net >= 0 ? 'text-green-700' : 'text-red-700'}`}
             >
+              {formatINR(s.net)}
+            </p>
+            <p className="mt-2 text-[11px] leading-snug text-neutral-500">
+              Same range as funds in &amp; spent: {formatINR(s.total_in)} − {formatINR(s.total_out)} ={' '}
               {formatINR(s.net)}
             </p>
           </div>
@@ -643,6 +711,9 @@ export function InvestmentLedgerClient() {
             <p className="text-xs font-medium text-neutral-500">Pending funds to be paid (open)</p>
             <p className="mt-1 text-lg font-semibold text-amber-800">
               {s.open_pending_count} bills · {formatINR(s.open_pending_remaining)}
+            </p>
+            <p className="mt-2 text-[11px] leading-snug text-neutral-500">
+              Open bill balances only — not filtered by “{scopeLabel}” above.
             </p>
           </div>
         </div>
@@ -1101,7 +1172,8 @@ export function InvestmentLedgerClient() {
       <div className="space-y-4">
         <h2 className="text-lg font-semibold text-seagreen-dark">Lists &amp; pending</h2>
         <p className="text-sm text-neutral-600">
-          Use the controls below to open details. Summaries above always reflect the selected period.
+          Use the controls below to open details. The first three summary figures use the range you picked
+          (e.g. All time or This month). Open pending counts every unpaid bill, regardless of that range.
         </p>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
@@ -1566,11 +1638,40 @@ export function InvestmentLedgerClient() {
                   </div>
                 </>
               )}
+              {editingEntry.entry_kind === 'expense' && (
+                <div>
+                  <label className="block text-xs font-medium text-neutral-600">
+                    Open pending to pay (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={editForm.pending_remaining}
+                    onChange={(ev) =>
+                      setEditForm((f) => ({ ...f, pending_remaining: ev.target.value }))
+                    }
+                    className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm disabled:bg-neutral-50"
+                    disabled={!editPendingReady}
+                  />
+                  {!editPendingReady ? (
+                    <p className="mt-1 text-[11px] text-neutral-500">Loading linked bill…</p>
+                  ) : (
+                    <p className="mt-1 text-[11px] text-neutral-500">
+                      Still owed on the bill linked to this line. Set to 0 to remove the bill (only if no
+                      payments recorded). New amount appears in open pending lists.
+                    </p>
+                  )}
+                </div>
+              )}
               {editError && <p className="text-sm text-red-600">{editError}</p>}
               <div className="flex gap-2 pt-2">
                 <button
                   type="submit"
-                  disabled={editSubmitting}
+                  disabled={
+                    editSubmitting ||
+                    (editingEntry.entry_kind === 'expense' && !editPendingReady)
+                  }
                   className="rounded-md bg-seagreen px-4 py-2 text-sm text-white hover:bg-seagreen-dark disabled:opacity-50"
                 >
                   Save changes
