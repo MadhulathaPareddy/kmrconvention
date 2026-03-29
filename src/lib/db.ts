@@ -3,6 +3,7 @@ import type {
   Event,
   Expenditure,
   ExpenditureDeletion,
+  ExpenditureFlow,
   Comment,
   MonthlySummary,
   EventHistoryEntry,
@@ -32,6 +33,9 @@ async function ensureSchemaOnce(): Promise<void> {
           price INTEGER NOT NULL,
           diesel_included BOOLEAN NOT NULL DEFAULT false,
           diesel_type VARCHAR(10),
+          decor_royalty INTEGER NOT NULL DEFAULT 0,
+          kitchen_royalty INTEGER NOT NULL DEFAULT 0,
+          diesel_amount INTEGER NOT NULL DEFAULT 0,
           diesel_expenditure_suppressed BOOLEAN NOT NULL DEFAULT false,
           notes TEXT,
           created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -47,6 +51,7 @@ async function ensureSchemaOnce(): Promise<void> {
           description TEXT,
           event_id UUID REFERENCES events(id) ON DELETE SET NULL,
           category_other VARCHAR(200),
+          flow_type VARCHAR(20) NOT NULL DEFAULT 'expense',
           created_at TIMESTAMPTZ DEFAULT NOW()
         )
       `;
@@ -57,6 +62,9 @@ async function ensureSchemaOnce(): Promise<void> {
           END IF;
           IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'expenditures' AND column_name = 'category_other') THEN
             ALTER TABLE expenditures ADD COLUMN category_other VARCHAR(200);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'expenditures' AND column_name = 'flow_type') THEN
+            ALTER TABLE expenditures ADD COLUMN flow_type VARCHAR(20) NOT NULL DEFAULT 'expense';
           END IF;
         END $$
       `;
@@ -78,6 +86,16 @@ async function ensureSchemaOnce(): Promise<void> {
           END IF;
           IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'events' AND column_name = 'diesel_expenditure_suppressed') THEN
             ALTER TABLE events ADD COLUMN diesel_expenditure_suppressed BOOLEAN NOT NULL DEFAULT false;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'events' AND column_name = 'decor_royalty') THEN
+            ALTER TABLE events ADD COLUMN decor_royalty INTEGER NOT NULL DEFAULT 0;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'events' AND column_name = 'kitchen_royalty') THEN
+            ALTER TABLE events ADD COLUMN kitchen_royalty INTEGER NOT NULL DEFAULT 0;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'events' AND column_name = 'diesel_amount') THEN
+            ALTER TABLE events ADD COLUMN diesel_amount INTEGER NOT NULL DEFAULT 0;
+            UPDATE events SET diesel_amount = 30000 WHERE diesel_type IN ('KMR', 'GUEST') OR (diesel_type IS NULL AND diesel_included = true);
           END IF;
         END $$
       `;
@@ -109,20 +127,23 @@ async function ensureSchemaOnce(): Promise<void> {
         )
       `;
       /* Diesel backfill removed from startup: it re-ran on every serverless cold start and
-       * re-inserted deleted Diesel rows. Use ensureDieselExpenditureForEvent on create/update,
+       * re-inserted deleted Diesel rows. Use syncDieselExpenditureForEvent on create/update,
        * or run a one-time SQL migration in the dashboard if needed for legacy data. */
     })();
   }
   await schemaPromise;
 }
 
-const DIESEL_EXPENDITURE_AMOUNT = 30000;
+const AUTO_DIESEL_DESCRIPTION = 'Diesel (included with event)';
+const DEFAULT_DIESEL_AMOUNT = 30000;
 
-/** Ensure one Diesel expenditure (₹30,000) exists for this event. Idempotent. */
-async function ensureDieselExpenditureForEvent(
+/** Sync auto-linked Diesel expenditure with event.diesel_amount; respects diesel_expenditure_suppressed. */
+async function syncDieselExpenditureForEvent(
   sql: ReturnType<typeof getSql>,
   eventId: string,
-  eventDate: string
+  eventDate: string,
+  dieselAmount: number,
+  hasDieselInclusion: boolean
 ): Promise<void> {
   const flags = await sql`
     SELECT diesel_expenditure_suppressed FROM events WHERE id = ${eventId}::uuid
@@ -130,19 +151,27 @@ async function ensureDieselExpenditureForEvent(
   const fr = (flags as unknown[])[0] as { diesel_expenditure_suppressed?: boolean } | undefined;
   if (fr?.diesel_expenditure_suppressed === true) return;
 
-  const existing = await sql`
-    SELECT 1 FROM expenditures
-    WHERE event_id = ${eventId}::uuid AND category = 'Diesel' AND amount = ${DIESEL_EXPENDITURE_AMOUNT}
-    LIMIT 1
-  `;
-  if (Array.isArray(existing) && existing.length > 0) return;
   await sql`
-    INSERT INTO expenditures (date, amount, category, description, event_id)
-    VALUES (${eventDate}::date, ${DIESEL_EXPENDITURE_AMOUNT}, 'Diesel', 'Diesel (included with event)', ${eventId}::uuid)
+    DELETE FROM expenditures
+    WHERE event_id = ${eventId}::uuid AND category = 'Diesel' AND description = ${AUTO_DIESEL_DESCRIPTION}
+  `;
+
+  if (!hasDieselInclusion || dieselAmount <= 0) return;
+
+  await sql`
+    INSERT INTO expenditures (date, amount, category, description, event_id, flow_type)
+    VALUES (${eventDate}::date, ${dieselAmount}, 'Diesel', ${AUTO_DIESEL_DESCRIPTION}, ${eventId}::uuid, 'expense')
   `;
 }
 
 // Neon returns rows array directly; normalize Event with diesel_type (diesel_included = diesel_type != null)
+function num(r: Record<string, unknown>, key: string, fallback = 0): number {
+  const v = r[key];
+  if (v == null) return fallback;
+  const n = Number(v);
+  return Number.isNaN(n) ? fallback : n;
+}
+
 function toEvent(row: Record<string, unknown>): Event {
   const r = row as Record<string, unknown>;
   const diesel_type = (r.diesel_type as string) || null;
@@ -151,7 +180,10 @@ function toEvent(row: Record<string, unknown>): Event {
     date: String(r.date),
     event_type: String(r.event_type),
     contact_info: r.contact_info != null ? String(r.contact_info) : null,
-    price: Number(r.price),
+    price: num(r, 'price'),
+    decor_royalty: num(r, 'decor_royalty'),
+    kitchen_royalty: num(r, 'kitchen_royalty'),
+    diesel_amount: num(r, 'diesel_amount'),
     diesel_included: diesel_type === 'KMR' || diesel_type === 'GUEST',
     diesel_type: diesel_type === 'KMR' || diesel_type === 'GUEST' ? diesel_type : null,
     diesel_expenditure_suppressed: Boolean(r.diesel_expenditure_suppressed),
@@ -173,7 +205,7 @@ export async function getEvents(from?: string, to?: string): Promise<Event[]> {
     return (Array.isArray(rows) ? rows : []).map((r) => toEvent(r as Record<string, unknown>));
   }
   const rows = await sql`
-    SELECT id, date, event_type, contact_info, price, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
+    SELECT id, date, event_type, contact_info, price, decor_royalty, kitchen_royalty, diesel_amount, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
     FROM events ORDER BY date DESC
   `;
   return (Array.isArray(rows) ? rows : []).map((r) => toEvent(r as Record<string, unknown>));
@@ -183,7 +215,7 @@ export async function getEventById(id: string): Promise<Event | null> {
   await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
-    SELECT id, date, event_type, contact_info, price, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
+    SELECT id, date, event_type, contact_info, price, decor_royalty, kitchen_royalty, diesel_amount, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
     FROM events WHERE id = ${id}::uuid
   `;
   const row = (rows as unknown[])[0];
@@ -195,6 +227,9 @@ export async function createEvent(data: {
   event_type: string;
   contact_info?: string;
   price: number;
+  decor_royalty?: number;
+  kitchen_royalty?: number;
+  diesel_amount?: number;
   diesel_type?: string | null;
   diesel_included?: boolean;
   notes?: string;
@@ -202,15 +237,21 @@ export async function createEvent(data: {
   await ensureSchemaOnce();
   const sql = getSql();
   const dieselType = data.diesel_type ?? (data.diesel_included ? 'KMR' : null);
+  const hasDiesel = dieselType === 'KMR' || dieselType === 'GUEST';
+  const decor = Math.max(0, Number(data.decor_royalty ?? 0) || 0);
+  const kitchen = Math.max(0, Number(data.kitchen_royalty ?? 0) || 0);
+  let dieselAmt = Math.max(0, Number(data.diesel_amount ?? 0) || 0);
+  if (hasDiesel && dieselAmt <= 0) dieselAmt = DEFAULT_DIESEL_AMOUNT;
+  if (!hasDiesel) dieselAmt = 0;
   const rows = await sql`
-    INSERT INTO events (date, event_type, contact_info, price, diesel_type, notes)
-    VALUES (${data.date}::date, ${data.event_type}, ${data.contact_info ?? null}, ${data.price}, ${dieselType}, ${data.notes ?? null})
-    RETURNING id, date, event_type, contact_info, price, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
+    INSERT INTO events (date, event_type, contact_info, price, decor_royalty, kitchen_royalty, diesel_amount, diesel_type, notes)
+    VALUES (${data.date}::date, ${data.event_type}, ${data.contact_info ?? null}, ${data.price}, ${decor}, ${kitchen}, ${dieselAmt}, ${dieselType}, ${data.notes ?? null})
+    RETURNING id, date, event_type, contact_info, price, decor_royalty, kitchen_royalty, diesel_amount, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
   `;
   const row = (rows as unknown[])[0];
   const event = row ? toEvent(row as Record<string, unknown>) : null;
-  if (event && (dieselType === 'KMR' || dieselType === 'GUEST')) {
-    await ensureDieselExpenditureForEvent(sql, event.id, event.date);
+  if (event) {
+    await syncDieselExpenditureForEvent(sql, event.id, event.date, event.diesel_amount, hasDiesel);
   }
   return event!;
 }
@@ -222,6 +263,9 @@ export async function updateEvent(
     event_type: string;
     contact_info: string;
     price: number;
+    decor_royalty: number;
+    kitchen_royalty: number;
+    diesel_amount: number;
     diesel_type: string | null;
     diesel_included: boolean;
     notes: string;
@@ -237,6 +281,9 @@ export async function updateEvent(
     event_type: event.event_type,
     contact_info: event.contact_info,
     price: event.price,
+    decor_royalty: event.decor_royalty,
+    kitchen_royalty: event.kitchen_royalty,
+    diesel_amount: event.diesel_amount,
     diesel_type: event.diesel_type,
     diesel_expenditure_suppressed: event.diesel_expenditure_suppressed,
     notes: event.notes,
@@ -256,23 +303,40 @@ export async function updateEvent(
   if (prevHadDiesel && !newHadDiesel) {
     nextSuppressed = false;
   }
+
+  const nextDecor = data.decor_royalty !== undefined ? Math.max(0, Number(data.decor_royalty) || 0) : event.decor_royalty;
+  const nextKitchen = data.kitchen_royalty !== undefined ? Math.max(0, Number(data.kitchen_royalty) || 0) : event.kitchen_royalty;
+  let nextDieselAmt =
+    data.diesel_amount !== undefined ? Math.max(0, Number(data.diesel_amount) || 0) : event.diesel_amount;
+  if (newHadDiesel && nextDieselAmt <= 0) nextDieselAmt = DEFAULT_DIESEL_AMOUNT;
+  if (!newHadDiesel) nextDieselAmt = 0;
+
   const rows = await sql`
     UPDATE events SET
       date = COALESCE(${data.date ?? event.date}::date, date),
       event_type = COALESCE(${data.event_type ?? event.event_type}, event_type),
       contact_info = COALESCE(${data.contact_info ?? event.contact_info}, contact_info),
       price = COALESCE(${data.price ?? event.price}, price),
+      decor_royalty = ${nextDecor},
+      kitchen_royalty = ${nextKitchen},
+      diesel_amount = ${nextDieselAmt},
       diesel_type = ${dieselType ?? null},
       diesel_expenditure_suppressed = ${nextSuppressed},
       notes = COALESCE(${data.notes ?? event.notes}, notes),
       updated_at = NOW()
     WHERE id = ${id}::uuid
-    RETURNING id, date, event_type, contact_info, price, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
+    RETURNING id, date, event_type, contact_info, price, decor_royalty, kitchen_royalty, diesel_amount, diesel_included, diesel_type, diesel_expenditure_suppressed, notes, created_at, updated_at
   `;
   const row = (rows as unknown[])[0];
   const updated = row ? toEvent(row as Record<string, unknown>) : null;
-  if (updated && (updated.diesel_type === 'KMR' || updated.diesel_type === 'GUEST')) {
-    await ensureDieselExpenditureForEvent(sql, updated.id, updated.date);
+  if (updated) {
+    await syncDieselExpenditureForEvent(
+      sql,
+      updated.id,
+      updated.date,
+      updated.diesel_amount,
+      newHadDiesel
+    );
   }
   return updated;
 }
@@ -292,6 +356,9 @@ export async function deleteEvent(id: string, reason: string): Promise<boolean> 
     event_type: event.event_type,
     contact_info: event.contact_info,
     price: event.price,
+    decor_royalty: event.decor_royalty,
+    kitchen_royalty: event.kitchen_royalty,
+    diesel_amount: event.diesel_amount,
     diesel_type: event.diesel_type,
     diesel_expenditure_suppressed: event.diesel_expenditure_suppressed,
     notes: event.notes,
@@ -325,23 +392,39 @@ export async function getEventHistory(eventId: string): Promise<EventHistoryEntr
   }) as EventHistoryEntry[];
 }
 
+function toExpenditure(row: Record<string, unknown>): Expenditure {
+  const r = row as Record<string, unknown>;
+  const ft = (r.flow_type as string) || 'expense';
+  return {
+    id: String(r.id),
+    date: String(r.date),
+    amount: Number(r.amount) || 0,
+    category: String(r.category ?? ''),
+    description: r.description != null ? String(r.description) : null,
+    created_at: String(r.created_at),
+    event_id: r.event_id != null ? String(r.event_id) : null,
+    category_other: r.category_other != null ? String(r.category_other) : null,
+    flow_type: ft === 'income' ? 'income' : 'expense',
+  };
+}
+
 // Expenditures
 export async function getExpenditures(from?: string, to?: string): Promise<Expenditure[]> {
   await ensureSchemaOnce();
   const sql = getSql();
   if (from && to) {
     const rows = await sql`
-      SELECT id, date, amount, category, description, event_id, category_other, created_at
+      SELECT id, date, amount, category, description, event_id, category_other, flow_type, created_at
       FROM expenditures WHERE date >= ${from}::date AND date <= ${to}::date
       ORDER BY date DESC
     `;
-    return rows as unknown as Expenditure[];
+    return (Array.isArray(rows) ? rows : []).map((r) => toExpenditure(r as Record<string, unknown>));
   }
   const rows = await sql`
-    SELECT id, date, amount, category, description, event_id, category_other, created_at
+    SELECT id, date, amount, category, description, event_id, category_other, flow_type, created_at
     FROM expenditures ORDER BY date DESC
   `;
-  return rows as unknown as Expenditure[];
+  return (Array.isArray(rows) ? rows : []).map((r) => toExpenditure(r as Record<string, unknown>));
 }
 
 export async function createExpenditure(data: {
@@ -351,26 +434,29 @@ export async function createExpenditure(data: {
   description?: string;
   event_id?: string | null;
   category_other?: string | null;
+  flow_type?: ExpenditureFlow;
 }): Promise<Expenditure> {
   await ensureSchemaOnce();
   const sql = getSql();
+  const flow: ExpenditureFlow = data.flow_type === 'income' ? 'income' : 'expense';
   const rows = await sql`
-    INSERT INTO expenditures (date, amount, category, description, event_id, category_other)
-    VALUES (${data.date}::date, ${data.amount}, ${data.category}, ${data.description ?? null}, ${data.event_id ?? null}, ${data.category_other ?? null})
-    RETURNING id, date, amount, category, description, event_id, category_other, created_at
+    INSERT INTO expenditures (date, amount, category, description, event_id, category_other, flow_type)
+    VALUES (${data.date}::date, ${data.amount}, ${data.category}, ${data.description ?? null}, ${data.event_id ?? null}, ${data.category_other ?? null}, ${flow})
+    RETURNING id, date, amount, category, description, event_id, category_other, flow_type, created_at
   `;
-  return (rows as unknown as Expenditure[])[0];
+  const row = (rows as unknown[])[0];
+  return toExpenditure(row as Record<string, unknown>);
 }
 
 export async function getExpenditureById(id: string): Promise<Expenditure | null> {
   await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
-    SELECT id, date, amount, category, description, event_id, category_other, created_at
+    SELECT id, date, amount, category, description, event_id, category_other, flow_type, created_at
     FROM expenditures WHERE id = ${id}::uuid
   `;
-  const arr = rows as unknown as Expenditure[];
-  return arr.length > 0 ? arr[0] : null;
+  const arr = rows as unknown[];
+  return arr.length > 0 ? toExpenditure(arr[0] as Record<string, unknown>) : null;
 }
 
 /** Soft-archive then delete: snapshot + reason in expenditure_deletions. */
@@ -387,6 +473,7 @@ export async function deleteExpenditure(id: string, reason: string): Promise<boo
     description: row.description,
     event_id: row.event_id,
     category_other: row.category_other,
+    flow_type: row.flow_type,
     created_at: row.created_at,
   };
   await sql`
@@ -394,6 +481,7 @@ export async function deleteExpenditure(id: string, reason: string): Promise<boo
     VALUES (${id}::uuid, ${JSON.stringify(snapshot)}::jsonb, ${reason})
   `;
   if (
+    row.flow_type === 'expense' &&
     row.event_id &&
     row.category === 'Diesel'
   ) {
@@ -462,19 +550,29 @@ export async function getMonthlySummaries(year?: number): Promise<MonthlySummary
         SELECT date_trunc('month', date) AS month, COUNT(*) AS cnt, COALESCE(SUM(price), 0) AS rev
         FROM events GROUP BY date_trunc('month', date)
       ),
-      exp AS (
+      exp_out AS (
         SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0) AS tot
-        FROM expenditures GROUP BY date_trunc('month', date)
+        FROM expenditures
+        WHERE COALESCE(flow_type, 'expense') = 'expense'
+        GROUP BY date_trunc('month', date)
+      ),
+      exp_in AS (
+        SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0) AS tot
+        FROM expenditures
+        WHERE flow_type = 'income'
+        GROUP BY date_trunc('month', date)
       )
       SELECT
         to_char(rev.month, 'YYYY-MM') AS month,
         EXTRACT(YEAR FROM rev.month)::int AS year,
         rev.cnt::int AS event_count,
         rev.rev::int AS revenue,
-        COALESCE(exp.tot, 0)::int AS expenditure,
-        (rev.rev - COALESCE(exp.tot, 0))::int AS profit
+        COALESCE(exp_out.tot, 0)::int AS expenditure,
+        COALESCE(exp_in.tot, 0)::int AS fund_inflow,
+        (rev.rev - COALESCE(exp_out.tot, 0))::int AS profit
       FROM rev
-      LEFT JOIN exp ON exp.month = rev.month
+      LEFT JOIN exp_out ON exp_out.month = rev.month
+      LEFT JOIN exp_in ON exp_in.month = rev.month
       WHERE date_trunc('year', rev.month) = ${`${year}-01-01`}::date
       ORDER BY rev.month DESC
     `;
@@ -485,19 +583,29 @@ export async function getMonthlySummaries(year?: number): Promise<MonthlySummary
       SELECT date_trunc('month', date) AS month, COUNT(*) AS cnt, COALESCE(SUM(price), 0) AS rev
       FROM events GROUP BY date_trunc('month', date)
     ),
-    exp AS (
+    exp_out AS (
       SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0) AS tot
-      FROM expenditures GROUP BY date_trunc('month', date)
+      FROM expenditures
+      WHERE COALESCE(flow_type, 'expense') = 'expense'
+      GROUP BY date_trunc('month', date)
+    ),
+    exp_in AS (
+      SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0) AS tot
+      FROM expenditures
+      WHERE flow_type = 'income'
+      GROUP BY date_trunc('month', date)
     )
     SELECT
       to_char(rev.month, 'YYYY-MM') AS month,
       EXTRACT(YEAR FROM rev.month)::int AS year,
       rev.cnt::int AS event_count,
       rev.rev::int AS revenue,
-      COALESCE(exp.tot, 0)::int AS expenditure,
-      (rev.rev - COALESCE(exp.tot, 0))::int AS profit
+      COALESCE(exp_out.tot, 0)::int AS expenditure,
+      COALESCE(exp_in.tot, 0)::int AS fund_inflow,
+      (rev.rev - COALESCE(exp_out.tot, 0))::int AS profit
     FROM rev
-    LEFT JOIN exp ON exp.month = rev.month
+    LEFT JOIN exp_out ON exp_out.month = rev.month
+    LEFT JOIN exp_in ON exp_in.month = rev.month
     ORDER BY rev.month DESC
   `;
   return rows as unknown as MonthlySummary[];
@@ -516,17 +624,30 @@ export async function getSummaryByRange(from: string, to: string, periodLabel: s
   const rev = (rows as unknown[])[0] as { event_count: number; revenue: number };
   const expRows = await sql`
     SELECT COALESCE(SUM(amount), 0)::int AS expenditure
-    FROM expenditures WHERE date >= ${from}::date AND date <= ${to}::date
+    FROM expenditures
+    WHERE date >= ${from}::date AND date <= ${to}::date
+    AND COALESCE(flow_type, 'expense') = 'expense'
+  `;
+  const inRows = await sql`
+    SELECT COALESCE(SUM(amount), 0)::int AS fund_inflow
+    FROM expenditures
+    WHERE date >= ${from}::date AND date <= ${to}::date
+    AND flow_type = 'income'
   `;
   const exp = (expRows as unknown[])[0] as { expenditure: number };
+  const inf = (inRows as unknown[])[0] as { fund_inflow: number };
   const event_count = rev?.event_count ?? 0;
   const revenue = rev?.revenue ?? 0;
   const expenditure = exp?.expenditure ?? 0;
+  const fund_inflow = inf?.fund_inflow ?? 0;
+  const fund_net = fund_inflow - expenditure;
   return {
     period_label: periodLabel,
     event_count,
     revenue,
     expenditure,
+    fund_inflow,
+    fund_net,
     profit: revenue - expenditure,
   };
 }

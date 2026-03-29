@@ -2,7 +2,8 @@
 
 import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
-import { EXPENDITURE_CATEGORIES } from '@/lib/types';
+import { EXPENDITURE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/types';
+import type { ExpenditureFlow } from '@/lib/types';
 import { formatDate } from '@/lib/format';
 
 type EventOption = { id: string; date: string; event_type: string };
@@ -12,6 +13,7 @@ export function ExpenditureForm() {
   const [events, setEvents] = useState<EventOption[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [flow, setFlow] = useState<ExpenditureFlow>('expense');
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     amount: 0,
@@ -28,20 +30,52 @@ export function ExpenditureForm() {
       .catch(() => setEvents([]));
   }, []);
 
+  function setFlowMode(next: ExpenditureFlow) {
+    setFlow(next);
+    setError('');
+    if (next === 'expense') {
+      setForm((f) => ({
+        ...f,
+        category: 'Diesel',
+        event_id: f.event_id,
+      }));
+    } else {
+      setForm((f) => ({
+        ...f,
+        category: 'Investment',
+        event_id: '',
+        category_other: '',
+      }));
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (form.amount <= 0) {
       setError('Amount must be greater than 0');
       return;
     }
-    if (!form.event_id && !form.description.trim()) {
-      setError('Description is required when the expense is not linked to an event.');
-      return;
+
+    if (flow === 'expense') {
+      if (!form.event_id && !form.description.trim()) {
+        setError('Description is required when the expense is not linked to an event.');
+        return;
+      }
+      if (form.category === 'Other' && !form.category_other.trim()) {
+        setError('Please specify the category name when "Other" is selected.');
+        return;
+      }
+    } else {
+      if (!form.description.trim()) {
+        setError('Reason / notes are required for funds added (investment or royalty).');
+        return;
+      }
+      if (form.category === 'Other' && !form.category_other.trim()) {
+        setError('Please describe the source when "Other" is selected (e.g. sponsor, misc).');
+        return;
+      }
     }
-    if (form.category === 'Other' && !form.category_other.trim()) {
-      setError('Please specify the category name when "Other" is selected.');
-      return;
-    }
+
     setError('');
     setSubmitting(true);
     try {
@@ -49,15 +83,19 @@ export function ExpenditureForm() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...form,
+          date: form.date,
           amount: Number(form.amount),
-          event_id: form.event_id || null,
-          category_other: form.category === 'Other' ? form.category_other.trim() : undefined,
+          category: form.category,
+          description: form.description.trim() || undefined,
+          event_id: flow === 'expense' && form.event_id ? form.event_id : null,
+          category_other:
+            form.category === 'Other' ? form.category_other.trim() : undefined,
+          flow_type: flow,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || 'Failed to add expenditure');
+        setError(data.error || 'Failed to add record');
         return;
       }
       setForm((f) => ({
@@ -77,7 +115,36 @@ export function ExpenditureForm() {
       onSubmit={handleSubmit}
       className="rounded-xl border border-seagreen-light bg-seagreen-light/30 p-4"
     >
-      <h2 className="mb-4 text-lg font-semibold text-seagreen-dark">Add expenditure</h2>
+      <h2 className="mb-3 text-lg font-semibold text-seagreen-dark">Add transaction</h2>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setFlowMode('expense')}
+          className={`rounded-md px-4 py-2 text-sm font-medium ${
+            flow === 'expense'
+              ? 'bg-red-600 text-white'
+              : 'bg-white text-neutral-700 ring-1 ring-neutral-200 hover:bg-neutral-50'
+          }`}
+        >
+          Funds removed (expense)
+        </button>
+        <button
+          type="button"
+          onClick={() => setFlowMode('income')}
+          className={`rounded-md px-4 py-2 text-sm font-medium ${
+            flow === 'income'
+              ? 'bg-green-600 text-white'
+              : 'bg-white text-neutral-700 ring-1 ring-neutral-200 hover:bg-neutral-50'
+          }`}
+        >
+          Funds added (investment / royalty)
+        </button>
+      </div>
+      <p className="mb-4 text-xs text-neutral-600">
+        {flow === 'expense'
+          ? 'Money leaving the hall account — shown in red in lists. Same categories as before.'
+          : 'Money coming in (investment, decor/kitchen royalty, or other) — shown in green. Reason is required.'}
+      </p>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <label htmlFor="ex-date" className="block text-xs font-medium text-neutral-600">
@@ -92,24 +159,26 @@ export function ExpenditureForm() {
             required
           />
         </div>
-        <div>
-          <label htmlFor="ex-event" className="block text-xs font-medium text-neutral-600">
-            Link to event
-          </label>
-          <select
-            id="ex-event"
-            value={form.event_id}
-            onChange={(e) => setForm((f) => ({ ...f, event_id: e.target.value }))}
-            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2 text-sm"
-          >
-            <option value="">No event / current month</option>
-            {events.map((ev) => (
-              <option key={ev.id} value={ev.id}>
-                {formatDate(ev.date)} — {ev.event_type}
-              </option>
-            ))}
-          </select>
-        </div>
+        {flow === 'expense' && (
+          <div>
+            <label htmlFor="ex-event" className="block text-xs font-medium text-neutral-600">
+              Link to event
+            </label>
+            <select
+              id="ex-event"
+              value={form.event_id}
+              onChange={(e) => setForm((f) => ({ ...f, event_id: e.target.value }))}
+              className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2 text-sm"
+            >
+              <option value="">No event / current month</option>
+              {events.map((ev) => (
+                <option key={ev.id} value={ev.id}>
+                  {formatDate(ev.date)} — {ev.event_type}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label htmlFor="ex-amount" className="block text-xs font-medium text-neutral-600">
             Amount (₹) *
@@ -128,7 +197,7 @@ export function ExpenditureForm() {
         </div>
         <div>
           <label htmlFor="ex-category" className="block text-xs font-medium text-neutral-600">
-            Category *
+            {flow === 'expense' ? 'Category *' : 'Type *'}
           </label>
           <select
             id="ex-category"
@@ -136,7 +205,7 @@ export function ExpenditureForm() {
             onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
             className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2 text-sm"
           >
-            {EXPENDITURE_CATEGORIES.map((c) => (
+            {(flow === 'expense' ? EXPENDITURE_CATEGORIES : INCOME_CATEGORIES).map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>
@@ -147,7 +216,11 @@ export function ExpenditureForm() {
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div>
           <label htmlFor="ex-desc" className="block text-xs font-medium text-neutral-600">
-            Description {!form.event_id ? '*' : '(required if not linked to event)'}
+            {flow === 'income'
+              ? 'Reason / notes *'
+              : !form.event_id
+                ? 'Description *'
+                : 'Description (optional if linked to event)'}
           </label>
           <input
             id="ex-desc"
@@ -155,14 +228,18 @@ export function ExpenditureForm() {
             value={form.description}
             onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
             className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2 text-sm"
-            placeholder="e.g. Generator fuel, staff salary"
-            required={!form.event_id}
+            placeholder={
+              flow === 'income'
+                ? 'e.g. Partner investment, decor settlement for May wedding'
+                : 'e.g. Generator fuel, staff salary'
+            }
+            required={flow === 'income' || !form.event_id}
           />
         </div>
         {form.category === 'Other' && (
           <div>
             <label htmlFor="ex-category-other" className="block text-xs font-medium text-neutral-600">
-              Specify category name *
+              {flow === 'expense' ? 'Specify category name *' : 'Describe source *'}
             </label>
             <input
               id="ex-category-other"
@@ -170,8 +247,8 @@ export function ExpenditureForm() {
               value={form.category_other}
               onChange={(e) => setForm((f) => ({ ...f, category_other: e.target.value }))}
               className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2 text-sm"
-              placeholder="e.g. Repairs, Miscellaneous"
-              required={form.category === 'Other'}
+              placeholder={flow === 'expense' ? 'e.g. Repairs' : 'e.g. Sponsor contribution'}
+              required
             />
           </div>
         )}
@@ -182,7 +259,7 @@ export function ExpenditureForm() {
           disabled={submitting}
           className="rounded-md bg-seagreen px-4 py-2 text-sm font-medium text-white hover:bg-seagreen-dark disabled:opacity-50"
         >
-          {submitting ? 'Adding…' : 'Add'}
+          {submitting ? 'Adding…' : flow === 'expense' ? 'Add expense' : 'Add to funds'}
         </button>
       </div>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}

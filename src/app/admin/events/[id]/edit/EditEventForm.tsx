@@ -15,6 +15,14 @@ export function EditEventForm({ event }: { event: Event }) {
     event_type: event.event_type ?? 'Marriage',
     contact_info: event.contact_info ?? '',
     price: event.price ?? 0,
+    decor_royalty: event.decor_royalty ?? 0,
+    kitchen_royalty: event.kitchen_royalty ?? 0,
+    diesel_amount:
+      event.diesel_amount > 0
+        ? event.diesel_amount
+        : event.diesel_type === 'KMR' || event.diesel_type === 'GUEST'
+          ? 30000
+          : 0,
     diesel_type: (event.diesel_type ?? null) as 'KMR' | 'GUEST' | null,
     notes: event.notes ?? '',
   });
@@ -30,6 +38,12 @@ export function EditEventForm({ event }: { event: Event }) {
         body: JSON.stringify({
           ...form,
           price: Number(form.price),
+          decor_royalty: Number(form.decor_royalty) || 0,
+          kitchen_royalty: Number(form.kitchen_royalty) || 0,
+          diesel_amount:
+            form.diesel_type === 'KMR' || form.diesel_type === 'GUEST'
+              ? Number(form.diesel_amount) || 0
+              : 0,
           diesel_type: form.diesel_type,
         }),
       });
@@ -117,18 +131,46 @@ export function EditEventForm({ event }: { event: Event }) {
           />
         </div>
         <div>
+          <label htmlFor="decor_royalty" className="block text-sm font-medium text-neutral-700">
+            Decor royalty (₹)
+          </label>
+          <input
+            id="decor_royalty"
+            type="number"
+            min={0}
+            value={form.decor_royalty}
+            onChange={(e) => setForm((f) => ({ ...f, decor_royalty: Number(e.target.value) || 0 }))}
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
+          />
+        </div>
+        <div>
+          <label htmlFor="kitchen_royalty" className="block text-sm font-medium text-neutral-700">
+            Kitchen royalty (₹)
+          </label>
+          <input
+            id="kitchen_royalty"
+            type="number"
+            min={0}
+            value={form.kitchen_royalty}
+            onChange={(e) => setForm((f) => ({ ...f, kitchen_royalty: Number(e.target.value) || 0 }))}
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
+          />
+        </div>
+        <div>
           <label htmlFor="diesel_type" className="block text-sm font-medium text-neutral-700">
             Incl_Diesel
           </label>
           <select
             id="diesel_type"
             value={form.diesel_type ?? ''}
-            onChange={(e) =>
+            onChange={(e) => {
+              const v = e.target.value === 'KMR' ? 'KMR' : e.target.value === 'GUEST' ? 'GUEST' : null;
               setForm((f) => ({
                 ...f,
-                diesel_type: e.target.value === 'KMR' ? 'KMR' : e.target.value === 'GUEST' ? 'GUEST' : null,
-              }))
-            }
+                diesel_type: v,
+                diesel_amount: v && f.diesel_amount <= 0 ? 30000 : f.diesel_amount,
+              }));
+            }}
             className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
           >
             {DIESEL_OPTIONS.map((opt) => (
@@ -138,6 +180,24 @@ export function EditEventForm({ event }: { event: Event }) {
             ))}
           </select>
         </div>
+        {(form.diesel_type === 'KMR' || form.diesel_type === 'GUEST') && (
+          <div>
+            <label htmlFor="diesel_amount" className="block text-sm font-medium text-neutral-700">
+              Diesel amount (₹)
+            </label>
+            <input
+              id="diesel_amount"
+              type="number"
+              min={0}
+              value={form.diesel_amount}
+              onChange={(e) => setForm((f) => ({ ...f, diesel_amount: Number(e.target.value) || 0 }))}
+              className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
+            />
+            <p className="mt-1 text-xs text-neutral-500">
+              Linked Diesel expenditure. Use 0 for default ₹30,000.
+            </p>
+          </div>
+        )}
         <div>
           <label htmlFor="notes" className="block text-sm font-medium text-neutral-700">
             Notes

@@ -9,6 +9,10 @@ export interface Event {
   event_type: EventType | string;
   contact_info: string | null;
   price: number;
+  decor_royalty: number;
+  kitchen_royalty: number;
+  /** Diesel cost for this event (used for linked Diesel expenditure when Incl_Diesel is set). */
+  diesel_amount: number;
   /** @deprecated use diesel_type */
   diesel_included?: boolean;
   diesel_type: DieselType;
@@ -41,6 +45,8 @@ export interface EventHistoryEntry {
   changed_at: string;
 }
 
+export type ExpenditureFlow = 'expense' | 'income';
+
 export interface Expenditure {
   id: string;
   date: string;
@@ -50,6 +56,8 @@ export interface Expenditure {
   created_at: string;
   event_id: string | null;
   category_other: string | null;
+  /** expense = funds removed; income = investment / royalty added to funds */
+  flow_type: ExpenditureFlow;
 }
 
 /** Row stored when an expenditure is deleted (admin reason + snapshot). */
@@ -95,6 +103,16 @@ export const EXPENDITURE_CATEGORIES: ExpenditureCategory[] = [
   'Other',
 ];
 
+/** Money added to operating funds (not event booking revenue). */
+export type IncomeCategory = 'Investment' | 'Royalty — Decor' | 'Royalty — Kitchen' | 'Other';
+
+export const INCOME_CATEGORIES: IncomeCategory[] = [
+  'Investment',
+  'Royalty — Decor',
+  'Royalty — Kitchen',
+  'Other',
+];
+
 export const EVENT_TYPES: EventType[] = ['Marriage', 'Reception', 'Birthday', 'Corporate', 'Other'];
 
 export interface MonthlySummary {
@@ -102,7 +120,10 @@ export interface MonthlySummary {
   year: number;
   event_count: number;
   revenue: number;
+  /** Sum of expense flow_type only */
   expenditure: number;
+  /** Sum of income flow_type (investment / royalties) */
+  fund_inflow: number;
   profit: number;
 }
 
@@ -111,6 +132,11 @@ export interface SummaryRow {
   period_label: string;
   event_count: number;
   revenue: number;
+  /** Funds removed (expenses only) */
   expenditure: number;
+  /** Funds added (investment / royalties) */
+  fund_inflow: number;
+  /** fund_inflow - expenditure for the period */
+  fund_net: number;
   profit: number;
 }

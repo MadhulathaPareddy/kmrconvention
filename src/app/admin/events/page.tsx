@@ -13,6 +13,9 @@ export default function AddEventPage() {
     event_type: 'Marriage',
     contact_info: '',
     price: 200000,
+    decor_royalty: 0,
+    kitchen_royalty: 0,
+    diesel_amount: 30000,
     diesel_type: null as 'KMR' | 'GUEST' | null,
     notes: '',
   });
@@ -111,18 +114,46 @@ export default function AddEventPage() {
           />
         </div>
         <div>
+          <label htmlFor="decor_royalty" className="block text-sm font-medium text-neutral-700">
+            Decor royalty (₹)
+          </label>
+          <input
+            id="decor_royalty"
+            type="number"
+            min={0}
+            value={form.decor_royalty}
+            onChange={(e) => setForm((f) => ({ ...f, decor_royalty: Number(e.target.value) || 0 }))}
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
+          />
+        </div>
+        <div>
+          <label htmlFor="kitchen_royalty" className="block text-sm font-medium text-neutral-700">
+            Kitchen royalty (₹)
+          </label>
+          <input
+            id="kitchen_royalty"
+            type="number"
+            min={0}
+            value={form.kitchen_royalty}
+            onChange={(e) => setForm((f) => ({ ...f, kitchen_royalty: Number(e.target.value) || 0 }))}
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
+          />
+        </div>
+        <div>
           <label htmlFor="diesel_type" className="block text-sm font-medium text-neutral-700">
             Incl_Diesel
           </label>
           <select
             id="diesel_type"
             value={form.diesel_type ?? ''}
-            onChange={(e) =>
+            onChange={(e) => {
+              const v = e.target.value === 'KMR' ? 'KMR' : e.target.value === 'GUEST' ? 'GUEST' : null;
               setForm((f) => ({
                 ...f,
-                diesel_type: e.target.value === 'KMR' ? 'KMR' : e.target.value === 'GUEST' ? 'GUEST' : null,
-              }))
-            }
+                diesel_type: v,
+                diesel_amount: v && f.diesel_amount <= 0 ? 30000 : f.diesel_amount,
+              }));
+            }}
             className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
           >
             {DIESEL_OPTIONS.map((opt) => (
@@ -132,6 +163,24 @@ export default function AddEventPage() {
             ))}
           </select>
         </div>
+        {(form.diesel_type === 'KMR' || form.diesel_type === 'GUEST') && (
+          <div>
+            <label htmlFor="diesel_amount" className="block text-sm font-medium text-neutral-700">
+              Diesel amount (₹)
+            </label>
+            <input
+              id="diesel_amount"
+              type="number"
+              min={0}
+              value={form.diesel_amount}
+              onChange={(e) => setForm((f) => ({ ...f, diesel_amount: Number(e.target.value) || 0 }))}
+              className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
+            />
+            <p className="mt-1 text-xs text-neutral-500">
+              Used for the linked Diesel expenditure. Leave 0 to use default ₹30,000.
+            </p>
+          </div>
+        )}
         <div>
           <label htmlFor="notes" className="block text-sm font-medium text-neutral-700">
             Notes

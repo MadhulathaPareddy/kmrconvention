@@ -55,7 +55,18 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json();
-    const { date, event_type, contact_info, price, diesel_type, diesel_included, notes } = body;
+    const {
+      date,
+      event_type,
+      contact_info,
+      price,
+      decor_royalty,
+      kitchen_royalty,
+      diesel_amount,
+      diesel_type,
+      diesel_included,
+      notes,
+    } = body;
     if (!date || !event_type || price == null) {
       return NextResponse.json(
         { error: 'date, event_type, and price are required' },
@@ -67,6 +78,9 @@ export async function POST(req: NextRequest) {
       event_type,
       contact_info: contact_info ?? undefined,
       price: Number(price),
+      decor_royalty: decor_royalty != null ? Number(decor_royalty) : undefined,
+      kitchen_royalty: kitchen_royalty != null ? Number(kitchen_royalty) : undefined,
+      diesel_amount: diesel_amount != null ? Number(diesel_amount) : undefined,
       diesel_type: diesel_type === 'KMR' || diesel_type === 'GUEST' ? diesel_type : null,
       diesel_included: diesel_included === true,
       notes: notes ?? undefined,

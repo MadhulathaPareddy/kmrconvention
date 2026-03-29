@@ -57,6 +57,14 @@ export default async function EventDetailPage({
             </dd>
           </div>
           <div>
+            <dt className="text-xs font-medium uppercase text-neutral-500">Decor royalty</dt>
+            <dd className="mt-0.5 font-medium">{formatINR(event.decor_royalty)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium uppercase text-neutral-500">Kitchen royalty</dt>
+            <dd className="mt-0.5 font-medium">{formatINR(event.kitchen_royalty)}</dd>
+          </div>
+          <div>
             <dt className="text-xs font-medium uppercase text-neutral-500">Incl_Diesel</dt>
             <dd className="mt-0.5">
               {event.diesel_type === 'KMR' ? (
@@ -68,6 +76,14 @@ export default async function EventDetailPage({
               )}
             </dd>
           </div>
+          {(event.diesel_type === 'KMR' || event.diesel_type === 'GUEST') && (
+            <div>
+              <dt className="text-xs font-medium uppercase text-neutral-500">Diesel amount</dt>
+              <dd className="mt-0.5 font-medium text-neutral-800">
+                {formatINR(event.diesel_amount > 0 ? event.diesel_amount : 30000)}
+              </dd>
+            </div>
+          )}
           {event.notes && (
             <div className="sm:col-span-2">
               <dt className="text-xs font-medium uppercase text-neutral-500">Notes</dt>

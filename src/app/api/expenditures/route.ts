@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getExpenditures, createExpenditure } from '@/lib/db';
 import { isAdmin } from '@/lib/auth';
+import { INCOME_CATEGORIES } from '@/lib/types';
 
 export async function GET(req: NextRequest) {
   try {
@@ -22,32 +23,52 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json();
-    const { date, amount, category, description, event_id, category_other } = body;
+    const { date, amount, category, description, event_id, category_other, flow_type } = body;
+    const flow = flow_type === 'income' ? 'income' : 'expense';
     if (!date || amount == null || !category) {
       return NextResponse.json(
         { error: 'date, amount, and category are required' },
         { status: 400 }
       );
     }
-    if (!event_id && !description?.trim()) {
-      return NextResponse.json(
-        { error: 'Description is required when the expense is not linked to an event' },
-        { status: 400 }
-      );
-    }
-    if (category === 'Other' && !category_other?.trim()) {
-      return NextResponse.json(
-        { error: 'Please specify the category name when "Other" is selected' },
-        { status: 400 }
-      );
+    if (flow === 'income') {
+      if (!(INCOME_CATEGORIES as readonly string[]).includes(category)) {
+        return NextResponse.json({ error: 'Invalid income category' }, { status: 400 });
+      }
+      if (!description?.trim()) {
+        return NextResponse.json(
+          { error: 'Reason / notes are required for funds added' },
+          { status: 400 }
+        );
+      }
+      if (category === 'Other' && !category_other?.trim()) {
+        return NextResponse.json(
+          { error: 'Please describe the source when "Other" is selected' },
+          { status: 400 }
+        );
+      }
+    } else {
+      if (!event_id && !description?.trim()) {
+        return NextResponse.json(
+          { error: 'Description is required when the expense is not linked to an event' },
+          { status: 400 }
+        );
+      }
+      if (category === 'Other' && !category_other?.trim()) {
+        return NextResponse.json(
+          { error: 'Please specify the category name when "Other" is selected' },
+          { status: 400 }
+        );
+      }
     }
     const expenditure = await createExpenditure({
       date,
       amount: Number(amount),
       category,
       description: description?.trim() || undefined,
-      event_id: event_id || null,
+      event_id: flow === 'income' ? null : event_id || null,
       category_other: category === 'Other' ? (category_other?.trim() || undefined) : undefined,
+      flow_type: flow,
     });
     return NextResponse.json(expenditure);
   } catch (e) {

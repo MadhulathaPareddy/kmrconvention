@@ -39,6 +39,13 @@ CREATE INDEX IF NOT EXISTS idx_expenditures_date ON expenditures(date);
 CREATE INDEX IF NOT EXISTS idx_expenditures_month ON expenditures((date_trunc('month', date)));
 CREATE INDEX IF NOT EXISTS idx_comments_event_id ON comments(event_id);
 
+-- Events: additional columns (also applied via app ensureSchemaOnce migrations)
+-- decor_royalty INTEGER NOT NULL DEFAULT 0
+-- kitchen_royalty INTEGER NOT NULL DEFAULT 0
+-- diesel_amount INTEGER NOT NULL DEFAULT 0
+-- diesel_type VARCHAR(10)
+-- diesel_expenditure_suppressed BOOLEAN NOT NULL DEFAULT false
+
 -- Audit: expenditure rows removed by admin (reason + snapshot)
 CREATE TABLE IF NOT EXISTS expenditure_deletions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -57,6 +57,9 @@ export default async function EventsPage({
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Event</th>
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Contact</th>
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Price</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Decor</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Kitchen</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Diesel ₹</th>
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Incl_Diesel</th>
               </tr>
             </thead>
@@ -80,6 +83,13 @@ export default async function EventsPage({
                   </td>
                   <td className="px-4 py-3 font-medium">
                     {formatINR(ev.price)}
+                  </td>
+                  <td className="px-4 py-3 text-neutral-600">{formatINR(ev.decor_royalty)}</td>
+                  <td className="px-4 py-3 text-neutral-600">{formatINR(ev.kitchen_royalty)}</td>
+                  <td className="px-4 py-3 text-neutral-600">
+                    {ev.diesel_type === 'KMR' || ev.diesel_type === 'GUEST'
+                      ? formatINR(ev.diesel_amount > 0 ? ev.diesel_amount : 30000)
+                      : '—'}
                   </td>
                   <td className="px-4 py-3">
                     {ev.diesel_type === 'KMR' ? (

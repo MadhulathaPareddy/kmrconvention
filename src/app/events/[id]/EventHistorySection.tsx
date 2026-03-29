@@ -21,6 +21,9 @@ function diffLabel(key: string): string {
     event_type: 'Event type',
     contact_info: 'Contact',
     price: 'Price',
+    decor_royalty: 'Decor royalty',
+    kitchen_royalty: 'Kitchen royalty',
+    diesel_amount: 'Diesel amount',
     diesel_type: 'Incl_Diesel',
     diesel_expenditure_suppressed: 'Diesel line removed',
     notes: 'Notes',
@@ -31,7 +34,15 @@ function diffLabel(key: string): string {
 function formatValue(key: string, val: unknown): string {
   if (val == null) return '—';
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
-  if (key === 'price' && typeof val === 'number') return formatINR(val);
+  if (
+    (key === 'price' ||
+      key === 'decor_royalty' ||
+      key === 'kitchen_royalty' ||
+      key === 'diesel_amount') &&
+    typeof val === 'number'
+  ) {
+    return formatINR(val);
+  }
   if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val)) {
     try {
       return new Date(val).toLocaleDateString('en-IN');
