@@ -30,6 +30,11 @@ export function EditEventForm({ event }: { event: Event }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const trimmedComment = changeComment.trim();
+    if (!trimmedComment) {
+      setError('A short comment explaining this change is required');
+      return;
+    }
     setError('');
     setSubmitting(true);
     try {
@@ -38,6 +43,7 @@ export function EditEventForm({ event }: { event: Event }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...form,
+          change_comment: trimmedComment,
           price: Number(form.price),
           decor_royalty: Number(form.decor_royalty) || 0,
           kitchen_royalty: Number(form.kitchen_royalty) || 0,
@@ -219,7 +225,10 @@ export function EditEventForm({ event }: { event: Event }) {
             id="change_comment"
             rows={2}
             value={changeComment}
-            onChange={(e) => setChangeComment(e.target.value)}
+            onChange={(e) => {
+              setChangeComment(e.target.value);
+              setError('');
+            }}
             placeholder="Why are you saving these changes? (required for audit)"
             className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
             required
