@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMonthlySummaries, getSummaryByRange } from '@/lib/db';
 import { isAdmin } from '@/lib/auth';
+import { istYmd, istWeekRangeFrom, istMonthRangeFrom } from '@/lib/ist';
 
 function getDateRangeForSummary(
   range: string | null,
@@ -8,32 +9,18 @@ function getDateRangeForSummary(
   toParam: string | null
 ): { from: string; to: string; label: string } | null {
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const d = now.getDate();
-  const dayOfWeek = now.getDay();
+  const today = istYmd(now);
 
   if (range === 'day') {
     return { from: today, to: today, label: 'Today' };
   }
   if (range === 'week') {
-    const start = new Date(y, m, d - dayOfWeek);
-    const end = new Date(y, m, d - dayOfWeek + 6);
-    return {
-      from: start.toISOString().slice(0, 10),
-      to: end.toISOString().slice(0, 10),
-      label: 'This week',
-    };
+    const { from, to } = istWeekRangeFrom(now);
+    return { from, to, label: 'This week' };
   }
   if (range === 'month') {
-    const start = new Date(y, m, 1);
-    const end = new Date(y, m + 1, 0);
-    return {
-      from: start.toISOString().slice(0, 10),
-      to: end.toISOString().slice(0, 10),
-      label: 'This month',
-    };
+    const { from, to } = istMonthRangeFrom(now);
+    return { from, to, label: 'This month' };
   }
   if (range === 'custom' && fromParam && toParam) {
     return {

@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { formatINR, formatDate } from '@/lib/format';
+import { formatINR, formatDate, formatDateTime } from '@/lib/format';
+import { istYmd, istWeekRangeFrom, istMonthRangeFrom, istYear } from '@/lib/ist';
 import { INVESTMENT_PARTNERS } from '@/lib/types';
 import type {
   InvestmentLedgerEntry,
@@ -29,22 +30,17 @@ type LedgerResponse = {
 
 function buildQuery(range: RangePreset, from: string, to: string): string {
   const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const d = now.getDate();
-  const dayOfWeek = now.getDay();
   if (range === 'all') return '';
   if (range === 'month') {
-    const start = new Date(y, m, 1);
-    const end = new Date(y, m + 1, 0);
-    return `from=${start.toISOString().slice(0, 10)}&to=${end.toISOString().slice(0, 10)}`;
+    const { from: f, to: t } = istMonthRangeFrom(now);
+    return `from=${f}&to=${t}`;
   }
   if (range === 'week') {
-    const start = new Date(y, m, d - dayOfWeek);
-    const end = new Date(y, m, d - dayOfWeek + 6);
-    return `from=${start.toISOString().slice(0, 10)}&to=${end.toISOString().slice(0, 10)}`;
+    const { from: f, to: t } = istWeekRangeFrom(now);
+    return `from=${f}&to=${t}`;
   }
   if (range === 'year') {
+    const y = istYear(now);
     return `from=${y}-01-01&to=${y}-12-31`;
   }
   if (range === 'custom' && from && to) {
@@ -105,55 +101,55 @@ export function InvestmentLedgerClient() {
   const [pendingSubTab, setPendingSubTab] = useState<'from_expense' | 'other'>('from_expense');
   const [expenseLedgerOptions, setExpenseLedgerOptions] = useState<InvestmentLedgerEntry[]>([]);
   const [expenseOptionsLoading, setExpenseOptionsLoading] = useState(false);
-  const [pendingFromExpenseForm, setPendingFromExpenseForm] = useState({
+  const [pendingFromExpenseForm, setPendingFromExpenseForm] = useState(() => ({
     ledger_entry_id: '',
-    date_incurred: new Date().toISOString().slice(0, 10),
+    date_incurred: istYmd(),
     pending_amount: '' as string | number,
-  });
-  const [pendingOtherForm, setPendingOtherForm] = useState({
-    date_incurred: new Date().toISOString().slice(0, 10),
+  }));
+  const [pendingOtherForm, setPendingOtherForm] = useState(() => ({
+    date_incurred: istYmd(),
     expense_type: '',
     description: '',
     amount: '' as string | number,
-  });
+  }));
 
   const [partnerForm, setPartnerForm] = useState<{
     date: string;
     partner: InvestmentPartner;
     amount: string | number;
     description: string;
-  }>({
-    date: new Date().toISOString().slice(0, 10),
+  }>(() => ({
+    date: istYmd(),
     partner: INVESTMENT_PARTNERS[0],
     amount: '',
     description: '',
-  });
-  const [externalForm, setExternalForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
+  }));
+  const [externalForm, setExternalForm] = useState(() => ({
+    date: istYmd(),
     external_party_name: '',
     external_details: '',
     amount: '' as string | number,
-  });
-  const [expenseForm, setExpenseForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
+  }));
+  const [expenseForm, setExpenseForm] = useState(() => ({
+    date: istYmd(),
     expense_type: '',
     description: '',
     amount: '' as string | number,
     /** Portion not yet paid; 0 = no pending (full amount booked as spent). */
     pending_amount: '' as string | number,
-  });
+  }));
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
 
   const [pendingModalOpen, setPendingModalOpen] = useState(false);
   const [payBill, setPayBill] = useState<InvestmentPendingBill | null>(null);
-  const [payForm, setPayForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
+  const [payForm, setPayForm] = useState(() => ({
+    date: istYmd(),
     amount: '' as string | number,
     paid_by: '',
     description: '',
-  });
+  }));
 
   const [auditModal, setAuditModal] = useState<{
     title: string;
@@ -593,7 +589,7 @@ export function InvestmentLedgerClient() {
       }
       setPayBill(null);
       setPayForm({
-        date: new Date().toISOString().slice(0, 10),
+        date: istYmd(),
         amount: '',
         paid_by: '',
         description: '',
@@ -1439,7 +1435,7 @@ export function InvestmentLedgerClient() {
                           setPayBill(b);
                           setFormError('');
                           setPayForm({
-                            date: new Date().toISOString().slice(0, 10),
+                            date: istYmd(),
                             amount: String(b.amount_remaining),
                             paid_by: '',
                             description: '',
@@ -1791,7 +1787,7 @@ export function InvestmentLedgerClient() {
                 {auditModal.rows.map((r) => (
                   <li key={r.id} className="rounded-lg border border-neutral-100 bg-neutral-50/80 p-3">
                     <p className="text-xs text-neutral-500">
-                      {new Date(r.created_at).toLocaleString()}
+                      {formatDateTime(r.created_at)}
                     </p>
                     <p className="font-medium text-seagreen-dark">{r.action.replace(/_/g, ' ')}</p>
                     {r.note && <p className="mt-1 text-neutral-700">{r.note}</p>}

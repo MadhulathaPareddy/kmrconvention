@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { formatDate } from '@/lib/format';
+import { formatDateTime } from '@/lib/format';
 
 type Comment = {
   id: string;
@@ -136,7 +136,7 @@ export function CommentsSection({ eventId }: { eventId: string }) {
               )}
               <p className="mt-1 text-neutral-700">{c.content}</p>
               <p className="mt-2 text-xs text-neutral-400">
-                {formatDate(c.created_at)}
+                {formatDateTime(c.created_at)}
               </p>
             </li>
           ))}

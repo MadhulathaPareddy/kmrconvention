@@ -1,25 +1,11 @@
 import Link from 'next/link';
 import { getMonthlySummaries, getEvents } from '@/lib/db';
 import { formatINR, formatDate } from '@/lib/format';
+import { istYmd, istMonthRangeFrom, istYear, istCalendarParts } from '@/lib/ist';
 import { isAdmin } from '@/lib/auth';
 import type { Event } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
-
-function calendarTodayYmd(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function currentMonthRangeYmd(): { from: string; to: string } {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = d.getMonth();
-  const from = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-  const last = new Date(y, m + 1, 0);
-  const to = `${y}-${String(m + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
-  return { from, to };
-}
 
 function isUpcomingEvent(ev: Event, todayYmd: string): boolean {
   return ev.date >= todayYmd;
@@ -35,16 +21,16 @@ export default async function HomePage({
 
   if (admin) {
     const [summaries, events] = await Promise.all([
-      getMonthlySummaries(new Date().getFullYear()),
+      getMonthlySummaries(istYear()),
       getEvents(),
     ]);
     const recentEvents = events.slice(0, 5);
-    const now = new Date();
-    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const { year: dashY, month: dashMo } = istCalendarParts(new Date());
+    const ym = `${dashY}-${String(dashMo).padStart(2, '0')}`;
     const currentMonth =
       summaries.find((s) => s.month === ym) ?? {
         month: ym,
-        year: now.getFullYear(),
+        year: dashY,
         event_count: 0,
         revenue: 0,
         expenditure: 0,
@@ -162,11 +148,11 @@ export default async function HomePage({
     );
   }
 
-  const todayYmd = calendarTodayYmd();
+  const todayYmd = istYmd();
   const showAll = sp?.period === 'all';
   const { from, to } = showAll
     ? { from: '2000-01-01', to: '2100-12-31' }
-    : currentMonthRangeYmd();
+    : istMonthRangeFrom(new Date());
   const publicEvents = await getEvents(from, to);
 
   return (

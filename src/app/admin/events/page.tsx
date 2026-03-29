@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, useRef } from 'react';
 import { EVENT_TYPES, DIESEL_OPTIONS } from '@/lib/types';
+import { istYmd } from '@/lib/ist';
 
 export default function AddEventPage() {
   const router = useRouter();
@@ -10,7 +11,7 @@ export default function AddEventPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
+    date: istYmd(),
     event_type: 'Marriage',
     contact_info: '',
     price: 200000,

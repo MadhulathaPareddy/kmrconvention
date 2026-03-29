@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { formatINR, formatDate } from '@/lib/format';
+import { formatINR, formatDate, calendarYearFromDateString } from '@/lib/format';
+import { IST_TIME_ZONE, istYear } from '@/lib/ist';
 import type { Expenditure, Event } from '@/lib/types';
 import { DeleteExpenditureButton } from './DeleteExpenditureButton';
 
@@ -111,7 +112,7 @@ export function ExpenditureViews({
     if (!byEvent.has(eid)) byEvent.set(eid, []);
     byEvent.get(eid)!.push(ex);
 
-    const year = ex.date ? new Date(ex.date).getFullYear() : new Date().getFullYear();
+    const year = ex.date ? calendarYearFromDateString(ex.date) : istYear();
     if (!byYear.has(year)) byYear.set(year, []);
     byYear.get(year)!.push(ex);
   }

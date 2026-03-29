@@ -2,33 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getEvents, createEvent } from '@/lib/db';
 import { isAdmin } from '@/lib/auth';
 import { toPublicEventPayload } from '@/lib/publicEvent';
-
-function getDateRangeForFilter(filter: string | null): { from?: string; to?: string } {
-  if (!filter || filter === 'all') return {};
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const d = now.getDate();
-  const dayOfWeek = now.getDay(); // 0 = Sunday
-
-  if (filter === 'week') {
-    const start = new Date(y, m, d - dayOfWeek);
-    const end = new Date(y, m, d - dayOfWeek + 6);
-    return {
-      from: start.toISOString().slice(0, 10),
-      to: end.toISOString().slice(0, 10),
-    };
-  }
-  if (filter === 'month') {
-    const start = new Date(y, m, 1);
-    const end = new Date(y, m + 1, 0);
-    return {
-      from: start.toISOString().slice(0, 10),
-      to: end.toISOString().slice(0, 10),
-    };
-  }
-  return {};
-}
+import { istEventsFilterRange, istMonthRangeFrom } from '@/lib/ist';
 
 export async function GET(req: NextRequest) {
   try {
@@ -42,12 +16,9 @@ export async function GET(req: NextRequest) {
         from = '2000-01-01';
         to = '2100-12-31';
       } else {
-        const now = new Date();
-        const y = now.getFullYear();
-        const m = now.getMonth();
-        from = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-        const last = new Date(y, m + 1, 0);
-        to = `${y}-${String(m + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
+        const r = istMonthRangeFrom(new Date());
+        from = r.from;
+        to = r.to;
       }
       const events = await getEvents(from, to);
       return NextResponse.json(events.map(toPublicEventPayload));
@@ -56,7 +27,7 @@ export async function GET(req: NextRequest) {
     let to = searchParams.get('to') ?? undefined;
     const filter = searchParams.get('filter');
     if (!from && !to && filter) {
-      const range = getDateRangeForFilter(filter);
+      const range = istEventsFilterRange(filter);
       from = range.from;
       to = range.to;
     }

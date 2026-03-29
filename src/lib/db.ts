@@ -271,12 +271,12 @@ function pgDateToYmd(d: unknown): string {
     if (m) return m[1];
     const parsed = new Date(d);
     if (!Number.isNaN(parsed.getTime())) {
-      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+      return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, '0')}-${String(parsed.getUTCDate()).padStart(2, '0')}`;
     }
     return d;
   }
   if (d instanceof Date && !Number.isNaN(d.getTime())) {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
   }
   const s = String(d);
   const m2 = s.match(/^(\d{4}-\d{2}-\d{2})/);

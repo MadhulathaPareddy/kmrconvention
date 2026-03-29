@@ -4,7 +4,8 @@ import { useRouter } from 'next/navigation';
 import { useState, useEffect, useMemo } from 'react';
 import { EXPENDITURE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/types';
 import type { ExpenditureFlow, ExpenditureDeletion } from '@/lib/types';
-import { formatDate, formatINR } from '@/lib/format';
+import { formatDate, formatINR, formatDateTime } from '@/lib/format';
+import { istYmd } from '@/lib/ist';
 
 type EventOption = { id: string; date: string; event_type: string };
 
@@ -32,7 +33,7 @@ export function ExpenditureForm({ deletions = [] }: { deletions?: ExpenditureDel
   const [panel, setPanel] = useState<PanelMode>('add-expense');
   const [flow, setFlow] = useState<ExpenditureFlow>('expense');
   const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
+    date: istYmd(),
     amount: 0,
     category: 'Diesel',
     description: '',
@@ -330,10 +331,7 @@ export function ExpenditureForm({ deletions = [] }: { deletions?: ExpenditureDel
                     return (
                       <tr key={row.id} className="border-b border-neutral-100 last:border-0">
                         <td className="px-3 py-2 text-neutral-700">
-                          {new Date(row.deleted_at).toLocaleString('en-IN', {
-                            dateStyle: 'medium',
-                            timeStyle: 'short',
-                          })}
+                          {formatDateTime(row.deleted_at)}
                         </td>
                         <td className="px-3 py-2">{sd ? formatDate(sd) : '—'}</td>
                         <td className="px-3 py-2 text-neutral-600">{eventLabel}</td>

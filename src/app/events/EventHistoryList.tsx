@@ -1,16 +1,5 @@
 import type { EventHistoryEntry } from '@/lib/types';
-import { formatINR } from '@/lib/format';
-
-function formatChangedAt(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString('en-IN', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    });
-  } catch {
-    return iso;
-  }
-}
+import { formatINR, formatDate, formatDateTime } from '@/lib/format';
 
 function diffLabel(key: string): string {
   const labels: Record<string, string> = {
@@ -41,11 +30,7 @@ function formatValue(key: string, val: unknown): string {
     return formatINR(val);
   }
   if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val)) {
-    try {
-      return new Date(val).toLocaleDateString('en-IN');
-    } catch {
-      return val;
-    }
+    return formatDate(val);
   }
   return String(val);
 }
@@ -67,7 +52,7 @@ export function EventHistoryList({ entries }: { entries: EventHistoryEntry[] }) 
           className="rounded-lg border border-neutral-100 bg-neutral-50/50 p-4 text-sm"
         >
           <div className="font-medium text-neutral-700">
-            Updated at {formatChangedAt(entry.changed_at)}
+            Updated at {formatDateTime(entry.changed_at)}
           </div>
           {entry.change_comment ? (
             <p className="mt-2 rounded-md border border-seagreen-light/60 bg-white px-3 py-2 text-neutral-800">

@@ -3,30 +3,11 @@ import { redirect } from 'next/navigation';
 import { getEvents, getEventHistoryCounts } from '@/lib/db';
 import { formatINR, formatDate } from '@/lib/format';
 import { isAdmin } from '@/lib/auth';
+import { istEventsFilterRange } from '@/lib/ist';
 import { EventsFilterTabs } from './EventsFilterTabs';
 import { ViewEventChangesButton } from './ViewEventChangesButton';
 
 export const dynamic = 'force-dynamic';
-
-function getDateRangeForFilter(filter: string | null): { from?: string; to?: string } {
-  if (!filter || filter === 'all') return {};
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const d = now.getDate();
-  const dayOfWeek = now.getDay();
-  if (filter === 'week') {
-    const start = new Date(y, m, d - dayOfWeek);
-    const end = new Date(y, m, d - dayOfWeek + 6);
-    return { from: start.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) };
-  }
-  if (filter === 'month') {
-    const start = new Date(y, m, 1);
-    const end = new Date(y, m + 1, 0);
-    return { from: start.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) };
-  }
-  return {};
-}
 
 export default async function EventsPage({
   searchParams,
@@ -38,7 +19,7 @@ export default async function EventsPage({
     redirect('/');
   }
   const { added, filter } = await searchParams;
-  const { from, to } = getDateRangeForFilter(filter ?? 'all');
+  const { from, to } = istEventsFilterRange(filter ?? 'all');
   const events = await getEvents(from, to);
   const historyCounts = await getEventHistoryCounts();
 
