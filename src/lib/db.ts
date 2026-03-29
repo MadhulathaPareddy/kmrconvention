@@ -1156,6 +1156,98 @@ export async function payInvestmentPendingBill(data: {
   return { entry, bill };
 }
 
+/**
+ * Add an open pending bill linked to an existing funds-spent (expense) ledger line.
+ * Does not alter the expense row; creates a new row in investment_pending_bills.
+ */
+export async function createInvestmentPendingFromExpenseLedger(data: {
+  ledger_entry_id: string;
+  date_incurred: string;
+  pending_amount: number;
+}): Promise<InvestmentPendingBill> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const entry = await getInvestmentLedgerEntryById(data.ledger_entry_id);
+  if (!entry || entry.entry_kind !== 'expense' || entry.direction !== 'out') {
+    throw new Error('Choose a funds spent (expense) line from the list');
+  }
+  const pending = Math.max(0, Math.floor(Number(data.pending_amount) || 0));
+  if (pending <= 0) throw new Error('Pending amount must be greater than 0');
+  const dateInc = data.date_incurred?.trim() || entry.date;
+  const expense_type = entry.expense_type?.trim() || 'Expense';
+  let description = entry.description?.trim() || null;
+  if (description) {
+    description =
+      description.replace(/\s*\(paid portion ₹[\d,]+ of ₹[\d,]+\)\s*$/i, '').trim() || null;
+  }
+  const billRows = await sql`
+    INSERT INTO investment_pending_bills (date_incurred, expense_type, description, total_amount, amount_paid)
+    VALUES (
+      ${dateInc}::date,
+      ${expense_type},
+      ${description},
+      ${pending},
+      0
+    )
+    RETURNING id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
+  `;
+  const bill = toInvestmentPendingBill((billRows as unknown[])[0] as Record<string, unknown>);
+  await insertInvestmentAudit(sql, {
+    ref_type: 'pending_bill',
+    ref_id: bill.id,
+    action: 'create_pending_from_expense',
+    note: `Linked to expense line ${entry.date} · ${expense_type} · recorded spent ₹${entry.amount}; new pending ₹${pending}`,
+    amount: pending,
+  });
+  await insertInvestmentAudit(sql, {
+    ref_type: 'ledger_entry',
+    ref_id: entry.id,
+    action: 'pending_bill_added',
+    note: `Pending to pay ₹${pending} (bill ${bill.id.slice(0, 8)}…)`,
+    amount: pending,
+  });
+  return bill;
+}
+
+/** Open pending bill with no new expense ledger line (obligation only). */
+export async function createInvestmentStandalonePendingBill(data: {
+  date_incurred: string;
+  expense_type: string;
+  description: string;
+  total_amount: number;
+}): Promise<InvestmentPendingBill> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const total = Math.max(0, Math.floor(Number(data.total_amount) || 0));
+  if (total <= 0) throw new Error('Amount must be greater than 0');
+  const et = data.expense_type?.trim() || '';
+  if (!et) throw new Error('Expense type is required');
+  const desc = data.description?.trim() || '';
+  if (!desc) throw new Error('Description is required');
+  const dateInc = data.date_incurred?.trim() || '';
+  if (!dateInc) throw new Error('Date is required');
+  const billRows = await sql`
+    INSERT INTO investment_pending_bills (date_incurred, expense_type, description, total_amount, amount_paid)
+    VALUES (
+      ${dateInc}::date,
+      ${et},
+      ${desc},
+      ${total},
+      0
+    )
+    RETURNING id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
+  `;
+  const bill = toInvestmentPendingBill((billRows as unknown[])[0] as Record<string, unknown>);
+  await insertInvestmentAudit(sql, {
+    ref_type: 'pending_bill',
+    ref_id: bill.id,
+    action: 'create_pending_standalone',
+    note: `${et}: ${desc} (standalone pending ₹${total})`,
+    amount: total,
+  });
+  return bill;
+}
+
 // Ensure tables exist (idempotent) — also used by POST /api/init
 export async function ensureSchema(): Promise<void> {
   await ensureSchemaOnce();

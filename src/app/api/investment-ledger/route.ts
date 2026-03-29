@@ -3,6 +3,8 @@ import {
   createInvestmentPartnerIn,
   createInvestmentExternalBorrowIn,
   createInvestmentExpense,
+  createInvestmentPendingFromExpenseLedger,
+  createInvestmentStandalonePendingBill,
   payInvestmentPendingBill,
   getInvestmentLedgerEntries,
   getInvestmentOpenPendingBills,
@@ -131,6 +133,53 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, ...result });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Invalid expense';
+        return NextResponse.json({ error: msg }, { status: 400 });
+      }
+    }
+
+    if (action === 'pending_from_expense') {
+      const { ledger_entry_id, date_incurred, pending_amount } = body;
+      if (!ledger_entry_id || pending_amount == null) {
+        return NextResponse.json(
+          { error: 'ledger_entry_id and pending_amount are required' },
+          { status: 400 }
+        );
+      }
+      const n = Number(pending_amount);
+      if (n <= 0) return NextResponse.json({ error: 'Pending amount must be positive' }, { status: 400 });
+      try {
+        const bill = await createInvestmentPendingFromExpenseLedger({
+          ledger_entry_id: String(ledger_entry_id),
+          date_incurred: typeof date_incurred === 'string' ? date_incurred : '',
+          pending_amount: n,
+        });
+        return NextResponse.json({ ok: true, pending_bill: bill });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to create pending bill';
+        return NextResponse.json({ error: msg }, { status: 400 });
+      }
+    }
+
+    if (action === 'pending_standalone') {
+      const { date_incurred, expense_type, description, total_amount } = body;
+      if (!date_incurred || !expense_type?.trim() || !description?.trim() || total_amount == null) {
+        return NextResponse.json(
+          { error: 'date_incurred, expense_type, description, and total_amount are required' },
+          { status: 400 }
+        );
+      }
+      const n = Number(total_amount);
+      if (n <= 0) return NextResponse.json({ error: 'Amount must be positive' }, { status: 400 });
+      try {
+        const bill = await createInvestmentStandalonePendingBill({
+          date_incurred: String(date_incurred),
+          expense_type: String(expense_type),
+          description: String(description),
+          total_amount: n,
+        });
+        return NextResponse.json({ ok: true, pending_bill: bill });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to create pending bill';
         return NextResponse.json({ error: msg }, { status: 400 });
       }
     }

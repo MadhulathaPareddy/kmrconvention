@@ -59,6 +59,12 @@ function defaultInvestmentPartner(name: string | null | undefined): InvestmentPa
     : INVESTMENT_PARTNERS[0];
 }
 
+function expenseOptionLabel(e: InvestmentLedgerEntry): string {
+  const t = e.expense_type || 'Expense';
+  const desc = e.description ? e.description.slice(0, 56) : '—';
+  return `${formatDate(e.date)} · ${t} · ${formatINR(e.amount)} · ${desc}`;
+}
+
 function entryLabel(e: InvestmentLedgerEntry): string {
   switch (e.entry_kind) {
     case 'partner_investment':
@@ -84,8 +90,22 @@ export function InvestmentLedgerClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const [flowTab, setFlowTab] = useState<'in' | 'out'>('in');
+  const [flowTab, setFlowTab] = useState<'in' | 'out' | 'pending'>('in');
   const [inflowTab, setInflowTab] = useState<InflowTab>('partner');
+  const [pendingSubTab, setPendingSubTab] = useState<'from_expense' | 'other'>('from_expense');
+  const [expenseLedgerOptions, setExpenseLedgerOptions] = useState<InvestmentLedgerEntry[]>([]);
+  const [expenseOptionsLoading, setExpenseOptionsLoading] = useState(false);
+  const [pendingFromExpenseForm, setPendingFromExpenseForm] = useState({
+    ledger_entry_id: '',
+    date_incurred: new Date().toISOString().slice(0, 10),
+    pending_amount: '' as string | number,
+  });
+  const [pendingOtherForm, setPendingOtherForm] = useState({
+    date_incurred: new Date().toISOString().slice(0, 10),
+    expense_type: '',
+    description: '',
+    amount: '' as string | number,
+  });
 
   const [partnerForm, setPartnerForm] = useState<{
     date: string;
@@ -190,6 +210,31 @@ export function InvestmentLedgerClient() {
     setLedgerExpanded(false);
     setPendingPeriodExpanded(false);
   }, [range, from, to]);
+
+  useEffect(() => {
+    if (flowTab !== 'pending') return;
+    let cancelled = false;
+    (async () => {
+      setExpenseOptionsLoading(true);
+      try {
+        const res = await fetch('/api/investment-ledger');
+        if (!res.ok) return;
+        const json = (await res.json()) as LedgerResponse;
+        const ex = (json.entries ?? []).filter(
+          (e) => e.entry_kind === 'expense' && e.direction === 'out'
+        );
+        ex.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+        if (!cancelled) setExpenseLedgerOptions(ex);
+      } catch {
+        if (!cancelled) setExpenseLedgerOptions([]);
+      } finally {
+        if (!cancelled) setExpenseOptionsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [flowTab]);
 
   useEffect(() => {
     if (!pendingModalOpen) return;
@@ -404,6 +449,59 @@ export function InvestmentLedgerClient() {
     }
   }
 
+  async function submitPendingFromExpense(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pendingFromExpenseForm.ledger_entry_id) {
+      setFormError('Select a funds spent line');
+      return;
+    }
+    const pending_amount = Number(pendingFromExpenseForm.pending_amount);
+    if (!Number.isFinite(pending_amount) || pending_amount <= 0) {
+      setFormError('Pending amount must be greater than 0');
+      return;
+    }
+    const ok = await postAction({
+      action: 'pending_from_expense',
+      ledger_entry_id: pendingFromExpenseForm.ledger_entry_id,
+      date_incurred: pendingFromExpenseForm.date_incurred,
+      pending_amount,
+    });
+    if (ok) {
+      setPendingFromExpenseForm((f) => ({
+        ...f,
+        pending_amount: '',
+      }));
+    }
+  }
+
+  async function submitPendingOther(e: React.FormEvent) {
+    e.preventDefault();
+    const total_amount = Number(pendingOtherForm.amount);
+    if (!Number.isFinite(total_amount) || total_amount <= 0) {
+      setFormError('Amount must be greater than 0');
+      return;
+    }
+    if (!pendingOtherForm.expense_type.trim() || !pendingOtherForm.description.trim()) {
+      setFormError('Expense type and description are required');
+      return;
+    }
+    const ok = await postAction({
+      action: 'pending_standalone',
+      date_incurred: pendingOtherForm.date_incurred,
+      expense_type: pendingOtherForm.expense_type.trim(),
+      description: pendingOtherForm.description.trim(),
+      total_amount,
+    });
+    if (ok) {
+      setPendingOtherForm((f) => ({
+        ...f,
+        expense_type: '',
+        description: '',
+        amount: '',
+      }));
+    }
+  }
+
   async function submitPay(e: React.FormEvent) {
     e.preventDefault();
     if (!payBill) return;
@@ -542,7 +640,7 @@ export function InvestmentLedgerClient() {
             </p>
           </div>
           <div className="rounded-xl border border-seagreen-light bg-white p-4 shadow-sm">
-            <p className="text-xs font-medium text-neutral-500">Open pending (all)</p>
+            <p className="text-xs font-medium text-neutral-500">Pending funds to be paid (open)</p>
             <p className="mt-1 text-lg font-semibold text-amber-800">
               {s.open_pending_count} bills · {formatINR(s.open_pending_remaining)}
             </p>
@@ -580,6 +678,20 @@ export function InvestmentLedgerClient() {
             }`}
           >
             Funds spent
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setFlowTab('pending');
+              setFormError('');
+            }}
+            className={`rounded-md px-4 py-2 text-sm font-medium ${
+              flowTab === 'pending'
+                ? 'bg-amber-600 text-white'
+                : 'bg-white text-neutral-700 ring-1 ring-neutral-200'
+            }`}
+          >
+            Pending funds to be paid
           </button>
         </div>
 
@@ -794,6 +906,194 @@ export function InvestmentLedgerClient() {
               </div>
             </div>
           </form>
+        )}
+
+        {flowTab === 'pending' && (
+          <div className="space-y-4">
+            <p className="text-xs text-neutral-600">
+              Record money you still owe: either attach it to an existing <strong>funds spent</strong> line, or add a
+              standalone obligation (no new spend line yet).
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingSubTab('from_expense');
+                  setFormError('');
+                }}
+                className={`rounded-md px-3 py-1 text-sm ${
+                  pendingSubTab === 'from_expense'
+                    ? 'bg-amber-100 font-medium text-amber-950 ring-1 ring-amber-300'
+                    : 'text-neutral-600'
+                }`}
+              >
+                From funds spent
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingSubTab('other');
+                  setFormError('');
+                }}
+                className={`rounded-md px-3 py-1 text-sm ${
+                  pendingSubTab === 'other'
+                    ? 'bg-amber-100 font-medium text-amber-950 ring-1 ring-amber-300'
+                    : 'text-neutral-600'
+                }`}
+              >
+                Other (description + type)
+              </button>
+            </div>
+
+            {pendingSubTab === 'from_expense' && (
+              <form onSubmit={submitPendingFromExpense} className="space-y-3">
+                {expenseOptionsLoading ? (
+                  <p className="text-sm text-neutral-500">Loading expense lines…</p>
+                ) : expenseLedgerOptions.length === 0 ? (
+                  <p className="text-sm text-amber-900">
+                    No funds spent lines yet. Record an expense under <strong>Funds spent</strong> or use{' '}
+                    <strong>Other</strong> above.
+                  </p>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium text-neutral-600">
+                        Funds spent line
+                      </label>
+                      <select
+                        value={pendingFromExpenseForm.ledger_entry_id}
+                        onChange={(ev) =>
+                          setPendingFromExpenseForm((f) => ({
+                            ...f,
+                            ledger_entry_id: ev.target.value,
+                          }))
+                        }
+                        className="mt-1 w-full max-w-2xl rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                        required
+                      >
+                        <option value="">Select…</option>
+                        {expenseLedgerOptions.map((ex) => (
+                          <option key={ex.id} value={ex.id}>
+                            {expenseOptionLabel(ex)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <div>
+                        <label className="block text-xs font-medium text-neutral-600">
+                          Date incurred (for this bill)
+                        </label>
+                        <input
+                          type="date"
+                          value={pendingFromExpenseForm.date_incurred}
+                          onChange={(ev) =>
+                            setPendingFromExpenseForm((f) => ({
+                              ...f,
+                              date_incurred: ev.target.value,
+                            }))
+                          }
+                          className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-neutral-600">
+                          Amount still to pay (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={pendingFromExpenseForm.pending_amount}
+                          onChange={(ev) =>
+                            setPendingFromExpenseForm((f) => ({
+                              ...f,
+                              pending_amount: ev.target.value,
+                            }))
+                          }
+                          className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                          required
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <button
+                          type="submit"
+                          disabled={submitting}
+                          className="rounded-md bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+                        >
+                          Add pending
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </form>
+            )}
+
+            {pendingSubTab === 'other' && (
+              <form onSubmit={submitPendingOther} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <label className="block text-xs font-medium text-neutral-600">Date incurred</label>
+                  <input
+                    type="date"
+                    value={pendingOtherForm.date_incurred}
+                    onChange={(ev) =>
+                      setPendingOtherForm((f) => ({ ...f, date_incurred: ev.target.value }))
+                    }
+                    className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-neutral-600">Expense type</label>
+                  <input
+                    type="text"
+                    value={pendingOtherForm.expense_type}
+                    onChange={(ev) =>
+                      setPendingOtherForm((f) => ({ ...f, expense_type: ev.target.value }))
+                    }
+                    className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                    placeholder="e.g. Vendor, Legal"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-neutral-600">Amount to pay (₹)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={pendingOtherForm.amount}
+                    onChange={(ev) =>
+                      setPendingOtherForm((f) => ({ ...f, amount: ev.target.value }))
+                    }
+                    className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                    required
+                  />
+                </div>
+                <div className="sm:col-span-2 lg:col-span-4">
+                  <label className="block text-xs font-medium text-neutral-600">Description</label>
+                  <input
+                    type="text"
+                    value={pendingOtherForm.description}
+                    onChange={(ev) =>
+                      setPendingOtherForm((f) => ({ ...f, description: ev.target.value }))
+                    }
+                    className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="rounded-md bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    Add pending
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
         )}
         {formError && <p className="mt-2 text-sm text-red-600">{formError}</p>}
       </div>
