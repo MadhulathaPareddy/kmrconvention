@@ -10,6 +10,9 @@ import type {
   SummaryRow,
   SummaryWithBreakdown,
   SummaryEventLine,
+  LoanAccountEntry,
+  LoanAccountEntryKind,
+  LoanAccountDashboard,
   InvestmentLedgerEntry,
   InvestmentPendingBill,
   InvestmentLedgerAuditRow,
@@ -17,6 +20,7 @@ import type {
   InvestmentEntryKind,
 } from './types';
 import { INVESTMENT_PARTNERS } from './types';
+import { istYmd } from './ist';
 
 function getSql() {
   const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
@@ -203,6 +207,17 @@ async function ensureSchemaOnce(): Promise<void> {
         CREATE UNIQUE INDEX IF NOT EXISTS investment_pending_bills_one_source_ledger_entry
         ON investment_pending_bills (source_ledger_entry_id)
         WHERE source_ledger_entry_id IS NOT NULL
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS loan_account_entries (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          entry_kind VARCHAR(24) NOT NULL,
+          event_id UUID REFERENCES events(id) ON DELETE SET NULL,
+          amount INTEGER NOT NULL CHECK (amount > 0),
+          note TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
       `;
       /* Diesel backfill removed from startup: it re-ran on every serverless cold start and
        * re-inserted deleted Diesel rows. Use syncDieselExpenditureForEvent on create/update,
@@ -957,6 +972,155 @@ export async function getSummaryWithBreakdown(
     event_lines,
     unlinked_expenditure: unlinked,
   };
+}
+
+function toLoanAccountEntry(r: Record<string, unknown>): LoanAccountEntry {
+  const k = String(r.entry_kind ?? '');
+  const entry_kind: LoanAccountEntryKind =
+    k === 'emi_payment' ? 'emi_payment' : 'transfer_from_event';
+  return {
+    id: String(r.id),
+    entry_kind,
+    event_id: r.event_id != null ? String(r.event_id) : null,
+    amount: Number(r.amount) || 0,
+    note: String(r.note ?? ''),
+    created_at: String(r.created_at),
+    updated_at: String(r.updated_at),
+  };
+}
+
+export async function getLoanAccountDashboard(): Promise<LoanAccountDashboard> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const today = istYmd();
+  const hall = await getSummaryByRange('2000-01-01', today, 'All time');
+  const rows = await sql`
+    SELECT id, entry_kind, event_id, amount, note, created_at, updated_at
+    FROM loan_account_entries
+    ORDER BY created_at DESC, id DESC
+  `;
+  const entries = (Array.isArray(rows) ? rows : []).map((r) =>
+    toLoanAccountEntry(r as Record<string, unknown>)
+  );
+  const tr = await sql`
+    SELECT COALESCE(SUM(amount), 0)::int AS s
+    FROM loan_account_entries
+    WHERE entry_kind = 'transfer_from_event'
+  `;
+  const em = await sql`
+    SELECT COALESCE(SUM(amount), 0)::int AS s
+    FROM loan_account_entries
+    WHERE entry_kind = 'emi_payment'
+  `;
+  const total_transfers_from_events = Number(
+    (tr as unknown as { s: number }[])[0]?.s ?? 0
+  );
+  const total_emi_payments = Number((em as unknown as { s: number }[])[0]?.s ?? 0);
+  const loan_balance = total_transfers_from_events - total_emi_payments;
+  const other_account_balance = hall.profit - total_transfers_from_events;
+  return {
+    entries,
+    hall_revenue: hall.revenue,
+    hall_expenditure: hall.expenditure,
+    hall_profit: hall.profit,
+    total_transfers_from_events,
+    total_emi_payments,
+    loan_balance,
+    other_account_balance,
+  };
+}
+
+export async function createLoanAccountEntry(data: {
+  entry_kind: LoanAccountEntryKind;
+  event_id?: string | null;
+  amount: number;
+  note: string;
+}): Promise<LoanAccountEntry | null> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const kind = data.entry_kind === 'emi_payment' ? 'emi_payment' : 'transfer_from_event';
+  const amt = Math.max(0, Math.floor(Number(data.amount) || 0));
+  if (amt <= 0) return null;
+  const note = (data.note ?? '').trim() || '—';
+  if (kind === 'transfer_from_event') {
+    const eid = data.event_id?.trim();
+    if (!eid) return null;
+    const ev = await getEventById(eid);
+    if (!ev) return null;
+    const ins = await sql`
+      INSERT INTO loan_account_entries (entry_kind, event_id, amount, note)
+      VALUES (${kind}, ${eid}::uuid, ${amt}, ${note})
+      RETURNING id, entry_kind, event_id, amount, note, created_at, updated_at
+    `;
+    const row = (ins as unknown[])[0];
+    return row ? toLoanAccountEntry(row as Record<string, unknown>) : null;
+  }
+  const ins = await sql`
+    INSERT INTO loan_account_entries (entry_kind, event_id, amount, note)
+    VALUES (${kind}, NULL, ${amt}, ${note})
+    RETURNING id, entry_kind, event_id, amount, note, created_at, updated_at
+  `;
+  const row = (ins as unknown[])[0];
+  return row ? toLoanAccountEntry(row as Record<string, unknown>) : null;
+}
+
+/** @returns null if not found or validation failed */
+export async function updateLoanAccountEntry(
+  id: string,
+  data: {
+    entry_kind: LoanAccountEntryKind;
+    event_id?: string | null;
+    amount: number;
+    note: string;
+  }
+): Promise<LoanAccountEntry | null> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const existingRows = await sql`
+    SELECT id FROM loan_account_entries WHERE id = ${id}::uuid
+  `;
+  if (!Array.isArray(existingRows) || existingRows.length === 0) return null;
+  const kind = data.entry_kind === 'emi_payment' ? 'emi_payment' : 'transfer_from_event';
+  const amt = Math.max(0, Math.floor(Number(data.amount) || 0));
+  if (amt <= 0) return null;
+  const note = (data.note ?? '').trim() || '—';
+  if (kind === 'transfer_from_event') {
+    const eid = data.event_id?.trim();
+    if (!eid) return null;
+    const ev = await getEventById(eid);
+    if (!ev) return null;
+    const upd = await sql`
+      UPDATE loan_account_entries
+      SET entry_kind = ${kind},
+          event_id = ${eid}::uuid,
+          amount = ${amt},
+          note = ${note},
+          updated_at = NOW()
+      WHERE id = ${id}::uuid
+      RETURNING id, entry_kind, event_id, amount, note, created_at, updated_at
+    `;
+    const row = (upd as unknown[])[0];
+    return row ? toLoanAccountEntry(row as Record<string, unknown>) : null;
+  }
+  const upd = await sql`
+    UPDATE loan_account_entries
+    SET entry_kind = ${kind},
+        event_id = NULL,
+        amount = ${amt},
+        note = ${note},
+        updated_at = NOW()
+    WHERE id = ${id}::uuid
+    RETURNING id, entry_kind, event_id, amount, note, created_at, updated_at
+  `;
+  const row = (upd as unknown[])[0];
+  return row ? toLoanAccountEntry(row as Record<string, unknown>) : null;
+}
+
+export async function deleteLoanAccountEntry(id: string): Promise<boolean> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const del = await sql`DELETE FROM loan_account_entries WHERE id = ${id}::uuid RETURNING id`;
+  return (del as unknown[]).length > 0;
 }
 
 // --- Investment ledger (admin-only feature; separate from hall expenditures) ---

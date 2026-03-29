@@ -204,3 +204,28 @@ export interface SummaryWithBreakdown extends SummaryRow {
   /** Expense rows in range with no event link. */
   unlinked_expenditure: number;
 }
+
+/** Money moved from an event into the loan pool, or EMI paid from the loan pool. */
+export type LoanAccountEntryKind = 'transfer_from_event' | 'emi_payment';
+
+export interface LoanAccountEntry {
+  id: string;
+  entry_kind: LoanAccountEntryKind;
+  event_id: string | null;
+  amount: number;
+  note: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Aggregates for Accounts page (loan vs other split vs hall summary). */
+export interface LoanAccountDashboard {
+  entries: LoanAccountEntry[];
+  hall_revenue: number;
+  hall_expenditure: number;
+  hall_profit: number;
+  total_transfers_from_events: number;
+  total_emi_payments: number;
+  loan_balance: number;
+  other_account_balance: number;
+}

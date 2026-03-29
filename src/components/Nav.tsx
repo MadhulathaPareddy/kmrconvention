@@ -53,6 +53,12 @@ export function Nav() {
                 Expenditures
               </Link>
               <Link
+                href="/admin/accounts"
+                className="text-seagreen-dark transition hover:text-seagreen"
+              >
+                Accounts
+              </Link>
+              <Link
                 href="/admin/investment-ledger"
                 className="text-seagreen-dark transition hover:text-seagreen"
               >
