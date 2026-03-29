@@ -251,12 +251,32 @@ function num(r: Record<string, unknown>, key: string, fallback = 0): number {
   return Number.isNaN(n) ? fallback : n;
 }
 
+/** Normalize PG `date` (string or Date from driver) to YYYY-MM-DD for correct comparisons with "today". */
+function pgDateToYmd(d: unknown): string {
+  if (d == null) return '';
+  if (typeof d === 'string') {
+    const m = d.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+    const parsed = new Date(d);
+    if (!Number.isNaN(parsed.getTime())) {
+      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+    }
+    return d;
+  }
+  if (d instanceof Date && !Number.isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  const s = String(d);
+  const m2 = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m2 ? m2[1] : s;
+}
+
 function toEvent(row: Record<string, unknown>): Event {
   const r = row as Record<string, unknown>;
   const diesel_type = (r.diesel_type as string) || null;
   return {
     id: String(r.id),
-    date: String(r.date),
+    date: pgDateToYmd(r.date),
     event_type: String(r.event_type),
     contact_info: r.contact_info != null ? String(r.contact_info) : null,
     price: num(r, 'price'),
