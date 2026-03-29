@@ -103,11 +103,10 @@ export const EXPENDITURE_CATEGORIES: ExpenditureCategory[] = [
   'Other',
 ];
 
-/** Money added to operating funds (not event booking revenue). */
-export type IncomeCategory = 'Investment' | 'Royalty — Decor' | 'Royalty — Kitchen' | 'Other';
+/** Royalty and other inflows recorded under expenditures (not event booking revenue). */
+export type IncomeCategory = 'Royalty — Decor' | 'Royalty — Kitchen' | 'Other';
 
 export const INCOME_CATEGORIES: IncomeCategory[] = [
-  'Investment',
   'Royalty — Decor',
   'Royalty — Kitchen',
   'Other',
@@ -168,27 +167,17 @@ export interface MonthlySummary {
   year: number;
   event_count: number;
   revenue: number;
-  /** Sum of expense flow_type only (funds removed) */
+  /** Sum of expense-type expenditures only */
   expenditure: number;
-  /** Sum of income flow_type (investment / royalties) */
-  fund_inflow: number;
-  /** fund_inflow − expenditure (ledger cash movement) */
-  fund_net: number;
   /** Event booking revenue − expenditure */
   profit: number;
 }
 
-/** For configurable summary: single row for a period (day/week/month/custom/all). */
+/** For configurable summary: single row for a period (day/week/month/custom/all). Events + expenses only. */
 export interface SummaryRow {
   period_label: string;
   event_count: number;
   revenue: number;
-  /** Funds removed (expenses only) */
   expenditure: number;
-  /** Funds added (investment / royalties) */
-  fund_inflow: number;
-  /** fund_inflow − expenditure for the period */
-  fund_net: number;
-  /** Event booking revenue − expenditure */
   profit: number;
 }

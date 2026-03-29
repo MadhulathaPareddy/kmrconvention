@@ -21,8 +21,6 @@ export default async function HomePage() {
       event_count: 0,
       revenue: 0,
       expenditure: 0,
-      fund_inflow: 0,
-      fund_net: 0,
       profit: 0,
     };
 
@@ -35,7 +33,7 @@ export default async function HomePage() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
           <p className="text-sm font-medium text-neutral-500">Events this month</p>
           <p className="mt-1 text-2xl font-bold text-seagreen-dark">
@@ -43,35 +41,19 @@ export default async function HomePage() {
           </p>
         </div>
         <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-neutral-500">Event revenue (bookings)</p>
+          <p className="text-sm font-medium text-neutral-500">Event revenue</p>
           <p className="mt-1 text-2xl font-bold text-green-700">
             {formatINR(currentMonth.revenue)}
           </p>
         </div>
         <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-neutral-500">Funds added (royalty / investment)</p>
-          <p className="mt-1 text-2xl font-bold text-green-700">
-            {formatINR(currentMonth.fund_inflow)}
-          </p>
-        </div>
-        <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-neutral-500">Funds out (expenses)</p>
+          <p className="text-sm font-medium text-neutral-500">Expenses (spent)</p>
           <p className="mt-1 text-2xl font-bold text-red-700">
             {formatINR(currentMonth.expenditure)}
           </p>
         </div>
         <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-neutral-500">Fund net (ledger)</p>
-          <p
-            className={`mt-1 text-2xl font-bold ${
-              currentMonth.fund_net >= 0 ? 'text-green-700' : 'text-red-700'
-            }`}
-          >
-            {formatINR(currentMonth.fund_net)}
-          </p>
-        </div>
-        <div className="rounded-xl border border-seagreen-light bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-neutral-500">Profit (bookings − funds out)</p>
+          <p className="text-sm font-medium text-neutral-500">Profit (revenue − expenses)</p>
           <p className="mt-1 text-2xl font-bold text-seagreen-dark">
             {formatINR(currentMonth.profit)}
           </p>

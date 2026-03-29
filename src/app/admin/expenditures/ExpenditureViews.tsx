@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import { formatINR, formatDate } from '@/lib/format';
-import type { Expenditure } from '@/lib/types';
-import type { Event } from '@/lib/types';
+import type { Expenditure, Event, ExpenditureDeletion } from '@/lib/types';
 import { DeleteExpenditureButton } from './DeleteExpenditureButton';
+
+type ListExp = Expenditure & { deleteReason?: string };
 
 function formatMonth(monthKey: string): string {
   const [y, m] = monthKey.split('-');
@@ -12,15 +13,15 @@ function formatMonth(monthKey: string): string {
   return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 }
 
-function sumOut(items: Expenditure[]): number {
+function sumOutActive(items: ListExp[]): number {
   return items
-    .filter((x) => x.flow_type !== 'income')
+    .filter((x) => !x.deleteReason && x.flow_type !== 'income')
     .reduce((s, x) => s + Number(x.amount), 0);
 }
 
-function sumIn(items: Expenditure[]): number {
+function sumInActive(items: ListExp[]): number {
   return items
-    .filter((x) => x.flow_type === 'income')
+    .filter((x) => !x.deleteReason && x.flow_type === 'income')
     .reduce((s, x) => s + Number(x.amount), 0);
 }
 
@@ -33,9 +34,12 @@ function normalizeExpenditure(ex: Partial<Expenditure> | null): Expenditure | nu
   if (!ex || ex.id == null) return null;
   let dateStr = '';
   try {
-    dateStr = ex.date != null
-      ? (typeof ex.date === 'string' ? ex.date : new Date(ex.date as string | number).toISOString().slice(0, 10))
-      : '';
+    dateStr =
+      ex.date != null
+        ? typeof ex.date === 'string'
+          ? ex.date
+          : new Date(ex.date as string | number).toISOString().slice(0, 10)
+        : '';
   } catch {
     dateStr = '';
   }
@@ -53,12 +57,88 @@ function normalizeExpenditure(ex: Partial<Expenditure> | null): Expenditure | nu
   };
 }
 
+function parseDeletionRow(d: ExpenditureDeletion): ListExp | null {
+  const s = d.snapshot as Record<string, unknown>;
+  if (s == null || typeof s !== 'object') return null;
+  let dateStr = '';
+  try {
+    const dv = s.date;
+    dateStr =
+      typeof dv === 'string'
+        ? dv.slice(0, 10)
+        : dv != null
+          ? new Date(dv as string | number).toISOString().slice(0, 10)
+          : '';
+  } catch {
+    return null;
+  }
+  if (!dateStr) return null;
+  const ex = normalizeExpenditure({
+    id: `deleted-row-${d.id}`,
+    date: dateStr,
+    amount: s.amount != null ? Number(s.amount) : 0,
+    category: s.category != null ? String(s.category) : '',
+    description: s.description != null ? String(s.description) : null,
+    event_id: s.event_id != null ? String(s.event_id) : null,
+    category_other: s.category_other != null ? String(s.category_other) : null,
+    flow_type: s.flow_type === 'income' ? 'income' : 'expense',
+    created_at: s.created_at != null ? String(s.created_at) : undefined,
+  });
+  if (!ex) return null;
+  return { ...ex, deleteReason: d.reason };
+}
+
+function sortByDateDesc(items: ListExp[]): ListExp[] {
+  return [...items].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+}
+
+function flowBadge(ex: ListExp) {
+  if (ex.deleteReason) {
+    return (
+      <span className="rounded bg-neutral-200 px-2 py-0.5 text-xs font-medium text-neutral-800">
+        Deleted
+      </span>
+    );
+  }
+  if (ex.flow_type === 'income') {
+    return (
+      <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
+        Royalty
+      </span>
+    );
+  }
+  return (
+    <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">Expense</span>
+  );
+}
+
+function descriptionCell(ex: ListExp) {
+  if (ex.deleteReason) {
+    return (
+      <div className="max-w-xs">
+        <p className="text-neutral-500 line-through">{ex.description || '—'}</p>
+        <p className="mt-1 text-xs font-medium text-amber-900">Removal reason: {ex.deleteReason}</p>
+      </div>
+    );
+  }
+  return <span className="text-neutral-700">{ex.description || '—'}</span>;
+}
+
+function amountClass(ex: ListExp): string {
+  if (ex.deleteReason) return 'px-4 py-2 font-medium text-neutral-500 line-through';
+  return ex.flow_type === 'income'
+    ? 'px-4 py-2 font-medium text-green-700'
+    : 'px-4 py-2 font-medium text-red-700';
+}
+
 export function ExpenditureViews({
   expenditures = [],
   events = [],
+  deletions = [],
 }: {
   expenditures?: Expenditure[] | null;
   events?: Event[] | null;
+  deletions?: ExpenditureDeletion[] | null;
 }) {
   const [view, setView] = useState<'monthly' | 'event' | 'yearly'>('monthly');
 
@@ -66,16 +146,25 @@ export function ExpenditureViews({
     .map(normalizeExpenditure)
     .filter((ex): ex is Expenditure => ex != null);
 
-  const byMonth = new Map<string, Expenditure[]>();
-  const byEvent = new Map<string | 'none', Expenditure[]>();
-  const byYear = new Map<number, Expenditure[]>();
+  const deletionRows = (Array.isArray(deletions) ? deletions : [])
+    .map(parseDeletionRow)
+    .filter((x): x is ListExp => x != null);
+
+  const allItems: ListExp[] = [
+    ...safeExpenditures.map((e) => ({ ...e })),
+    ...deletionRows,
+  ];
+
+  const byMonth = new Map<string, ListExp[]>();
+  const byEvent = new Map<string | 'none', ListExp[]>();
+  const byYear = new Map<number, ListExp[]>();
   const eventMap = new Map(
     (Array.isArray(events) ? events : [])
       .filter((e) => e != null && (e as Event).id != null)
       .map((e) => [(e as Event).id, e as Event])
   );
 
-  for (const ex of safeExpenditures) {
+  for (const ex of allItems) {
     const monthKey = ex.date ? ex.date.slice(0, 7) : '';
     if (monthKey) {
       if (!byMonth.has(monthKey)) byMonth.set(monthKey, []);
@@ -94,29 +183,29 @@ export function ExpenditureViews({
   const sortedMonths = Array.from(byMonth.keys()).sort().reverse();
   const sortedYears = Array.from(byYear.keys()).sort((a, b) => b - a);
 
-  const allOut = sumOut(safeExpenditures);
-  const allIn = sumIn(safeExpenditures);
+  const allOut = sumOutActive(allItems);
+  const allIn = sumInActive(allItems);
   const balance = allIn - allOut;
 
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-seagreen-light bg-white p-4 shadow-sm">
-        <h3 className="text-sm font-semibold text-seagreen-dark">Fund balance (all listed transactions)</h3>
+        <h3 className="text-sm font-semibold text-seagreen-dark">Fund balance (active rows only)</h3>
         <p className="mt-1 text-xs text-neutral-500">
-          Event booking revenue is tracked separately on the Dashboard. This is cash-style movement from
-          expenses vs investments / royalties recorded here.
+          Event booking revenue is on the Dashboard. Totals below exclude deleted rows; removed entries still
+          appear in the tables with reason. Royalties are recorded as funds added.
         </p>
         <div className="mt-3 flex flex-wrap gap-6 text-sm">
           <div>
-            <span className="text-neutral-500">Funds removed</span>
+            <span className="text-neutral-500">Funds spent (expense)</span>
             <p className="text-lg font-semibold text-red-700">{formatINR(allOut)}</p>
           </div>
           <div>
-            <span className="text-neutral-500">Funds added</span>
+            <span className="text-neutral-500">Funds added (royalty)</span>
             <p className="text-lg font-semibold text-green-700">{formatINR(allIn)}</p>
           </div>
           <div>
-            <span className="text-neutral-500">Net (in − out)</span>
+            <span className="text-neutral-500">Net (royalty − spent)</span>
             <p
               className={`text-lg font-semibold ${balance >= 0 ? 'text-green-800' : 'text-red-800'}`}
             >
@@ -168,18 +257,21 @@ export function ExpenditureViews({
             <p className="py-8 text-center text-neutral-500">No transactions yet.</p>
           ) : (
             sortedMonths.map((monthKey) => {
-              const items = byMonth.get(monthKey)!;
-              const outM = sumOut(items);
-              const inM = sumIn(items);
+              const items = sortByDateDesc(byMonth.get(monthKey)!);
+              const outM = sumOutActive(items);
+              const inM = sumInActive(items);
               const netM = inM - outM;
               return (
-                <div key={monthKey} className="rounded-xl border border-seagreen-light bg-white overflow-hidden">
-                  <div className="flex flex-col gap-1 px-4 py-2 bg-seagreen-light/50 border-b border-seagreen-light sm:flex-row sm:items-center sm:justify-between">
+                <div
+                  key={monthKey}
+                  className="overflow-hidden rounded-xl border border-seagreen-light bg-white"
+                >
+                  <div className="flex flex-col gap-1 border-b border-seagreen-light bg-seagreen-light/50 px-4 py-2 sm:flex-row sm:items-center sm:justify-between">
                     <span className="font-semibold text-seagreen-dark">{formatMonth(monthKey)}</span>
                     <div className="text-sm">
-                      <span className="text-red-700">Out {formatINR(outM)}</span>
+                      <span className="text-red-700">Spent {formatINR(outM)}</span>
                       <span className="mx-2 text-neutral-400">·</span>
-                      <span className="text-green-700">In {formatINR(inM)}</span>
+                      <span className="text-green-700">Royalty {formatINR(inM)}</span>
                       <span className="mx-2 text-neutral-400">·</span>
                       <span className={`font-semibold ${netM >= 0 ? 'text-green-800' : 'text-red-800'}`}>
                         Net {formatINR(netM)}
@@ -193,37 +285,32 @@ export function ExpenditureViews({
                         <th className="px-4 py-2 font-medium text-neutral-600">Flow</th>
                         <th className="px-4 py-2 font-medium text-neutral-600">Event</th>
                         <th className="px-4 py-2 font-medium text-neutral-600">Category</th>
+                        <th className="px-4 py-2 font-medium text-neutral-600">Description</th>
                         <th className="px-4 py-2 font-medium text-neutral-600">Amount</th>
                         <th className="px-4 py-2 font-medium text-neutral-600">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {items.map((ex) => (
-                        <tr key={ex.id} className="border-b border-neutral-50 last:border-0">
+                        <tr
+                          key={ex.id}
+                          className={`border-b border-neutral-50 last:border-0 ${ex.deleteReason ? 'bg-neutral-50/80' : ''}`}
+                        >
                           <td className="px-4 py-2">{formatDate(ex.date)}</td>
-                          <td className="px-4 py-2">
-                            {ex.flow_type === 'income' ? (
-                              <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
-                                Added
-                              </span>
-                            ) : (
-                              <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
-                                Removed
-                              </span>
-                            )}
-                          </td>
+                          <td className="px-4 py-2">{flowBadge(ex)}</td>
                           <td className="px-4 py-2 text-neutral-600">
-                            {ex.event_id ? (eventMap.get(ex.event_id) ? `${formatDate((eventMap.get(ex.event_id)! as Event).date)} — ${(eventMap.get(ex.event_id)! as Event).event_type}` : String(ex.event_id)) : '—'}
+                            {ex.event_id
+                              ? eventMap.get(ex.event_id)
+                                ? `${formatDate((eventMap.get(ex.event_id)! as Event).date)} — ${(eventMap.get(ex.event_id)! as Event).event_type}`
+                                : String(ex.event_id)
+                              : '—'}
                           </td>
                           <td className="px-4 py-2">{catLabel(ex)}</td>
-                          <td
-                            className={
-                              ex.flow_type === 'income' ? 'px-4 py-2 font-medium text-green-700' : 'px-4 py-2 font-medium text-red-700'
-                            }
-                          >
-                            {formatINR(ex.amount)}
+                          <td className="px-4 py-2 text-sm">{descriptionCell(ex)}</td>
+                          <td className={amountClass(ex)}>{formatINR(ex.amount)}</td>
+                          <td className="px-4 py-2">
+                            {!ex.deleteReason ? <DeleteExpenditureButton id={ex.id} /> : '—'}
                           </td>
-                          <td className="px-4 py-2"><DeleteExpenditureButton id={ex.id} /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -250,19 +337,28 @@ export function ExpenditureViews({
                 const dateB = evB?.date ?? '';
                 return String(dateB).localeCompare(String(dateA));
               })
-              .map(([eid, items]) => {
-                const outM = sumOut(items);
-                const inM = sumIn(items);
+              .map(([eid, rawItems]) => {
+                const items = sortByDateDesc(rawItems);
+                const outM = sumOutActive(items);
+                const inM = sumInActive(items);
                 const netM = inM - outM;
-                const label = eid === 'none' ? 'No event / General' : (eventMap.get(eid) as Event) ? `${formatDate((eventMap.get(eid) as Event).date)} — ${(eventMap.get(eid) as Event).event_type}` : String(eid);
+                const label =
+                  eid === 'none'
+                    ? 'No event / General'
+                    : eventMap.get(eid as string)
+                      ? `${formatDate((eventMap.get(eid as string) as Event).date)} — ${(eventMap.get(eid as string) as Event).event_type}`
+                      : String(eid);
                 return (
-                  <div key={String(eid)} className="rounded-xl border border-seagreen-light bg-white overflow-hidden">
-                    <div className="flex flex-col gap-1 px-4 py-2 bg-seagreen-light/50 border-b border-seagreen-light sm:flex-row sm:items-center sm:justify-between">
+                  <div
+                    key={String(eid)}
+                    className="overflow-hidden rounded-xl border border-seagreen-light bg-white"
+                  >
+                    <div className="flex flex-col gap-1 border-b border-seagreen-light bg-seagreen-light/50 px-4 py-2 sm:flex-row sm:items-center sm:justify-between">
                       <span className="font-semibold text-seagreen-dark">{label}</span>
                       <div className="text-sm">
-                        <span className="text-red-700">Out {formatINR(outM)}</span>
+                        <span className="text-red-700">Spent {formatINR(outM)}</span>
                         <span className="mx-2 text-neutral-400">·</span>
-                        <span className="text-green-700">In {formatINR(inM)}</span>
+                        <span className="text-green-700">Royalty {formatINR(inM)}</span>
                         <span className="mx-2 text-neutral-400">·</span>
                         <span className={`font-semibold ${netM >= 0 ? 'text-green-800' : 'text-red-800'}`}>
                           Net {formatINR(netM)}
@@ -282,29 +378,18 @@ export function ExpenditureViews({
                       </thead>
                       <tbody>
                         {items.map((ex) => (
-                          <tr key={ex.id} className="border-b border-neutral-50 last:border-0">
+                          <tr
+                            key={ex.id}
+                            className={`border-b border-neutral-50 last:border-0 ${ex.deleteReason ? 'bg-neutral-50/80' : ''}`}
+                          >
                             <td className="px-4 py-2">{formatDate(ex.date)}</td>
-                            <td className="px-4 py-2">
-                              {ex.flow_type === 'income' ? (
-                                <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
-                                  Added
-                                </span>
-                              ) : (
-                                <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
-                                  Removed
-                                </span>
-                              )}
-                            </td>
+                            <td className="px-4 py-2">{flowBadge(ex)}</td>
                             <td className="px-4 py-2">{catLabel(ex)}</td>
-                            <td className="px-4 py-2 text-neutral-600">{ex.description || '—'}</td>
-                            <td
-                              className={
-                                ex.flow_type === 'income' ? 'px-4 py-2 font-medium text-green-700' : 'px-4 py-2 font-medium text-red-700'
-                              }
-                            >
-                              {formatINR(ex.amount)}
+                            <td className="px-4 py-2 text-sm">{descriptionCell(ex)}</td>
+                            <td className={amountClass(ex)}>{formatINR(ex.amount)}</td>
+                            <td className="px-4 py-2">
+                              {!ex.deleteReason ? <DeleteExpenditureButton id={ex.id} /> : '—'}
                             </td>
-                            <td className="px-4 py-2"><DeleteExpenditureButton id={ex.id} /></td>
                           </tr>
                         ))}
                       </tbody>
@@ -322,18 +407,21 @@ export function ExpenditureViews({
             <p className="py-8 text-center text-neutral-500">No transactions yet.</p>
           ) : (
             sortedYears.map((year) => {
-              const items = byYear.get(year)!;
-              const outM = sumOut(items);
-              const inM = sumIn(items);
+              const items = sortByDateDesc(byYear.get(year)!);
+              const outM = sumOutActive(items);
+              const inM = sumInActive(items);
               const netM = inM - outM;
               return (
-                <div key={year} className="rounded-xl border border-seagreen-light bg-white overflow-hidden">
-                  <div className="flex flex-col gap-1 px-4 py-2 bg-seagreen-light/50 border-b border-seagreen-light sm:flex-row sm:items-center sm:justify-between">
+                <div
+                  key={year}
+                  className="overflow-hidden rounded-xl border border-seagreen-light bg-white"
+                >
+                  <div className="flex flex-col gap-1 border-b border-seagreen-light bg-seagreen-light/50 px-4 py-2 sm:flex-row sm:items-center sm:justify-between">
                     <span className="font-semibold text-seagreen-dark">{year}</span>
                     <div className="text-sm">
-                      <span className="text-red-700">Out {formatINR(outM)}</span>
+                      <span className="text-red-700">Spent {formatINR(outM)}</span>
                       <span className="mx-2 text-neutral-400">·</span>
-                      <span className="text-green-700">In {formatINR(inM)}</span>
+                      <span className="text-green-700">Royalty {formatINR(inM)}</span>
                       <span className="mx-2 text-neutral-400">·</span>
                       <span className={`font-semibold ${netM >= 0 ? 'text-green-800' : 'text-red-800'}`}>
                         Net {formatINR(netM)}
@@ -347,37 +435,32 @@ export function ExpenditureViews({
                         <th className="px-4 py-2 font-medium text-neutral-600">Flow</th>
                         <th className="px-4 py-2 font-medium text-neutral-600">Event</th>
                         <th className="px-4 py-2 font-medium text-neutral-600">Category</th>
+                        <th className="px-4 py-2 font-medium text-neutral-600">Description</th>
                         <th className="px-4 py-2 font-medium text-neutral-600">Amount</th>
                         <th className="px-4 py-2 font-medium text-neutral-600">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {items.map((ex) => (
-                        <tr key={ex.id} className="border-b border-neutral-50 last:border-0">
+                        <tr
+                          key={ex.id}
+                          className={`border-b border-neutral-50 last:border-0 ${ex.deleteReason ? 'bg-neutral-50/80' : ''}`}
+                        >
                           <td className="px-4 py-2">{formatDate(ex.date)}</td>
-                          <td className="px-4 py-2">
-                            {ex.flow_type === 'income' ? (
-                              <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
-                                Added
-                              </span>
-                            ) : (
-                              <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
-                                Removed
-                              </span>
-                            )}
-                          </td>
+                          <td className="px-4 py-2">{flowBadge(ex)}</td>
                           <td className="px-4 py-2 text-neutral-600">
-                            {ex.event_id ? (eventMap.get(ex.event_id) ? `${formatDate((eventMap.get(ex.event_id)! as Event).date)} — ${(eventMap.get(ex.event_id)! as Event).event_type}` : String(ex.event_id)) : '—'}
+                            {ex.event_id
+                              ? eventMap.get(ex.event_id)
+                                ? `${formatDate((eventMap.get(ex.event_id)! as Event).date)} — ${(eventMap.get(ex.event_id)! as Event).event_type}`
+                                : String(ex.event_id)
+                              : '—'}
                           </td>
                           <td className="px-4 py-2">{catLabel(ex)}</td>
-                          <td
-                            className={
-                              ex.flow_type === 'income' ? 'px-4 py-2 font-medium text-green-700' : 'px-4 py-2 font-medium text-red-700'
-                            }
-                          >
-                            {formatINR(ex.amount)}
+                          <td className="px-4 py-2 text-sm">{descriptionCell(ex)}</td>
+                          <td className={amountClass(ex)}>{formatINR(ex.amount)}</td>
+                          <td className="px-4 py-2">
+                            {!ex.deleteReason ? <DeleteExpenditureButton id={ex.id} /> : '—'}
                           </td>
-                          <td className="px-4 py-2"><DeleteExpenditureButton id={ex.id} /></td>
                         </tr>
                       ))}
                     </tbody>

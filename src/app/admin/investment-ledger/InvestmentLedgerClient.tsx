@@ -103,7 +103,8 @@ export function InvestmentLedgerClient() {
     expense_type: '',
     description: '',
     amount: '' as string | number,
-    is_pending: false,
+    /** Portion not yet paid; 0 = no pending (full amount booked as spent). */
+    pending_amount: '' as string | number,
   });
 
   const [submitting, setSubmitting] = useState(false);
@@ -257,13 +258,26 @@ export function InvestmentLedgerClient() {
       setFormError('Expense type and description are required');
       return;
     }
+    const pendingRaw = expenseForm.pending_amount;
+    const pending_amount =
+      pendingRaw === '' || pendingRaw === null || pendingRaw === undefined
+        ? 0
+        : Number(pendingRaw);
+    if (Number.isNaN(pending_amount) || pending_amount < 0) {
+      setFormError('Pending amount must be 0 or more');
+      return;
+    }
+    if (pending_amount > amount) {
+      setFormError('Pending cannot exceed total amount');
+      return;
+    }
     const ok = await postAction({
       action: 'expense',
       date: expenseForm.date,
       expense_type: expenseForm.expense_type.trim(),
       description: expenseForm.description.trim(),
       amount,
-      is_pending: expenseForm.is_pending,
+      pending_amount,
     });
     if (ok) {
       setExpenseForm((f) => ({
@@ -271,7 +285,7 @@ export function InvestmentLedgerClient() {
         amount: '',
         description: '',
         expense_type: '',
-        is_pending: false,
+        pending_amount: '',
       }));
     }
   }
@@ -399,7 +413,7 @@ export function InvestmentLedgerClient() {
             <p className="mt-1 text-xl font-semibold text-green-700">{formatINR(s.total_in)}</p>
           </div>
           <div className="rounded-xl border border-seagreen-light bg-white p-4 shadow-sm">
-            <p className="text-xs font-medium text-neutral-500">Funds out (period)</p>
+            <p className="text-xs font-medium text-neutral-500">Funds spent (period)</p>
             <p className="mt-1 text-xl font-semibold text-red-700">{formatINR(s.total_out)}</p>
           </div>
           <div className="rounded-xl border border-seagreen-light bg-white p-4 shadow-sm">
@@ -448,7 +462,7 @@ export function InvestmentLedgerClient() {
                 : 'bg-white text-neutral-700 ring-1 ring-neutral-200'
             }`}
           >
-            Funds out
+            Funds spent
           </button>
         </div>
 
@@ -590,67 +604,77 @@ export function InvestmentLedgerClient() {
         )}
 
         {flowTab === 'out' && (
-          <form onSubmit={submitExpense} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <label className="block text-xs font-medium text-neutral-600">Date</label>
-              <input
-                type="date"
-                value={expenseForm.date}
-                onChange={(e) => setExpenseForm((f) => ({ ...f, date: e.target.value }))}
-                className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-neutral-600">Expense type</label>
-              <input
-                type="text"
-                value={expenseForm.expense_type}
-                onChange={(e) => setExpenseForm((f) => ({ ...f, expense_type: e.target.value }))}
-                className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
-                placeholder="e.g. Vendor, Legal, Equipment"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-neutral-600">Amount (₹)</label>
-              <input
-                type="number"
-                min={1}
-                value={expenseForm.amount}
-                onChange={(e) => setExpenseForm((f) => ({ ...f, amount: e.target.value }))}
-                className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
-                required
-              />
-            </div>
-            <div className="flex items-end">
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <form onSubmit={submitExpense} className="space-y-3">
+            <p className="text-xs text-neutral-600">
+              <strong>Pending (not yet paid):</strong> enter how much is still owed. Leave empty or 0 for{' '}
+              <strong>no pending</strong> — the full amount is recorded as spent now. If it equals the total,
+              nothing is spent yet and the full amount goes to the pending list.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <label className="block text-xs font-medium text-neutral-600">Date</label>
                 <input
-                  type="checkbox"
-                  checked={expenseForm.is_pending}
-                  onChange={(e) => setExpenseForm((f) => ({ ...f, is_pending: e.target.checked }))}
+                  type="date"
+                  value={expenseForm.date}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, date: e.target.value }))}
+                  className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                  required
                 />
-                Pending (not paid yet)
-              </label>
-            </div>
-            <div className="sm:col-span-2 lg:col-span-4">
-              <label className="block text-xs font-medium text-neutral-600">Description</label>
-              <input
-                type="text"
-                value={expenseForm.description}
-                onChange={(e) => setExpenseForm((f) => ({ ...f, description: e.target.value }))}
-                className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
-                required
-              />
-            </div>
-            <div>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="rounded-md bg-seagreen px-4 py-2 text-sm text-white hover:bg-seagreen-dark disabled:opacity-50"
-              >
-                {expenseForm.is_pending ? 'Add pending bill' : 'Record expense'}
-              </button>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-neutral-600">Expense type</label>
+                <input
+                  type="text"
+                  value={expenseForm.expense_type}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, expense_type: e.target.value }))}
+                  className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                  placeholder="e.g. Vendor, Legal, Equipment"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-neutral-600">Total amount (₹)</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={expenseForm.amount}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, amount: e.target.value }))}
+                  className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-neutral-600">
+                  Pending — not yet paid (₹)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={expenseForm.pending_amount}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, pending_amount: e.target.value }))}
+                  className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                  placeholder="0 = no pending"
+                />
+              </div>
+              <div className="sm:col-span-2 lg:col-span-4">
+                <label className="block text-xs font-medium text-neutral-600">Description</label>
+                <input
+                  type="text"
+                  value={expenseForm.description}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, description: e.target.value }))}
+                  className="mt-1 w-full rounded-md border border-neutral-200 px-2 py-2 text-sm"
+                  required
+                />
+              </div>
+              <div>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="rounded-md bg-seagreen px-4 py-2 text-sm text-white hover:bg-seagreen-dark disabled:opacity-50"
+                >
+                  Save
+                </button>
+              </div>
             </div>
           </form>
         )}

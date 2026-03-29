@@ -1,14 +1,15 @@
 import Link from 'next/link';
-import { getExpenditures, getEvents } from '@/lib/db';
+import { getExpenditures, getEvents, getDeletedExpenditures } from '@/lib/db';
 import { ExpenditureForm } from './ExpenditureForm';
 import { ExpenditureViews } from './ExpenditureViews';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminExpendituresPage() {
-  const [expenditures, events] = await Promise.all([
+  const [expenditures, events, deletions] = await Promise.all([
     getExpenditures(),
     getEvents(),
+    getDeletedExpenditures(),
   ]);
 
   return (
@@ -33,7 +34,11 @@ export default async function AdminExpendituresPage() {
 
       <ExpenditureForm />
 
-      <ExpenditureViews expenditures={expenditures ?? []} events={events ?? []} />
+      <ExpenditureViews
+        expenditures={expenditures ?? []}
+        events={events ?? []}
+        deletions={deletions ?? []}
+      />
     </div>
   );
 }

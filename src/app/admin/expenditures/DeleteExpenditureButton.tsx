@@ -68,6 +68,7 @@ export function DeleteExpenditureButton({ id }: { id: string }) {
                 onChange={(e) => setReason(e.target.value)}
                 placeholder="e.g. Duplicate entry, wrong amount, reclassified"
                 className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2 text-sm"
+                required
               />
             </div>
             {error && <p className="mt-2 text-sm text-red-600">{error}</p>}

@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'expense') {
-      const { date, expense_type, description, amount, is_pending } = body;
+      const { date, expense_type, description, amount, pending_amount } = body;
       if (!date || !expense_type?.trim() || !description?.trim() || amount == null) {
         return NextResponse.json(
           { error: 'date, expense_type, description, and amount are required' },
@@ -116,14 +116,23 @@ export async function POST(req: NextRequest) {
       }
       const n = Number(amount);
       if (n <= 0) return NextResponse.json({ error: 'Amount must be positive' }, { status: 400 });
-      const result = await createInvestmentExpense({
-        date,
-        expense_type: String(expense_type),
-        description: String(description),
-        amount: n,
-        is_pending: Boolean(is_pending),
-      });
-      return NextResponse.json({ ok: true, ...result });
+      const p = pending_amount != null && pending_amount !== '' ? Number(pending_amount) : 0;
+      if (Number.isNaN(p) || p < 0) {
+        return NextResponse.json({ error: 'Invalid pending amount' }, { status: 400 });
+      }
+      try {
+        const result = await createInvestmentExpense({
+          date,
+          expense_type: String(expense_type),
+          description: String(description),
+          amount: n,
+          pending_amount: p,
+        });
+        return NextResponse.json({ ok: true, ...result });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Invalid expense';
+        return NextResponse.json({ error: msg }, { status: 400 });
+      }
     }
 
     if (action === 'pay_pending') {

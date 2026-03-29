@@ -601,7 +601,7 @@ export async function createComment(data: {
   return (rows as unknown as Comment[])[0];
 }
 
-// Monthly aggregates — months include any month with events and/or ledger (expenditures) activity
+// Monthly aggregates — events + expense outflows only (no royalty/income in summary)
 export async function getMonthlySummaries(year?: number): Promise<MonthlySummary[]> {
   await ensureSchemaOnce();
   const sql = getSql();
@@ -610,7 +610,7 @@ export async function getMonthlySummaries(year?: number): Promise<MonthlySummary
       WITH all_activity AS (
         SELECT date FROM events
         UNION ALL
-        SELECT date FROM expenditures
+        SELECT date FROM expenditures WHERE COALESCE(flow_type, 'expense') = 'expense'
       ),
       months AS (
         SELECT DISTINCT date_trunc('month', date) AS month FROM all_activity
@@ -624,12 +624,6 @@ export async function getMonthlySummaries(year?: number): Promise<MonthlySummary
         FROM expenditures
         WHERE COALESCE(flow_type, 'expense') = 'expense'
         GROUP BY date_trunc('month', date)
-      ),
-      exp_in AS (
-        SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0)::bigint AS tot
-        FROM expenditures
-        WHERE flow_type = 'income'
-        GROUP BY date_trunc('month', date)
       )
       SELECT
         to_char(m.month, 'YYYY-MM') AS month,
@@ -637,13 +631,10 @@ export async function getMonthlySummaries(year?: number): Promise<MonthlySummary
         COALESCE(rev.cnt, 0)::int AS event_count,
         COALESCE(rev.rev, 0)::int AS revenue,
         COALESCE(exp_out.tot, 0)::int AS expenditure,
-        COALESCE(exp_in.tot, 0)::int AS fund_inflow,
-        (COALESCE(exp_in.tot, 0) - COALESCE(exp_out.tot, 0))::int AS fund_net,
         (COALESCE(rev.rev, 0) - COALESCE(exp_out.tot, 0))::int AS profit
       FROM months m
       LEFT JOIN rev ON rev.month = m.month
       LEFT JOIN exp_out ON exp_out.month = m.month
-      LEFT JOIN exp_in ON exp_in.month = m.month
       WHERE EXTRACT(YEAR FROM m.month) = ${year}
       ORDER BY m.month DESC
     `;
@@ -653,7 +644,7 @@ export async function getMonthlySummaries(year?: number): Promise<MonthlySummary
     WITH all_activity AS (
       SELECT date FROM events
       UNION ALL
-      SELECT date FROM expenditures
+      SELECT date FROM expenditures WHERE COALESCE(flow_type, 'expense') = 'expense'
     ),
     months AS (
       SELECT DISTINCT date_trunc('month', date) AS month FROM all_activity
@@ -667,12 +658,6 @@ export async function getMonthlySummaries(year?: number): Promise<MonthlySummary
       FROM expenditures
       WHERE COALESCE(flow_type, 'expense') = 'expense'
       GROUP BY date_trunc('month', date)
-    ),
-    exp_in AS (
-      SELECT date_trunc('month', date) AS month, COALESCE(SUM(amount), 0)::bigint AS tot
-      FROM expenditures
-      WHERE flow_type = 'income'
-      GROUP BY date_trunc('month', date)
     )
     SELECT
       to_char(m.month, 'YYYY-MM') AS month,
@@ -680,13 +665,10 @@ export async function getMonthlySummaries(year?: number): Promise<MonthlySummary
       COALESCE(rev.cnt, 0)::int AS event_count,
       COALESCE(rev.rev, 0)::int AS revenue,
       COALESCE(exp_out.tot, 0)::int AS expenditure,
-      COALESCE(exp_in.tot, 0)::int AS fund_inflow,
-      (COALESCE(exp_in.tot, 0) - COALESCE(exp_out.tot, 0))::int AS fund_net,
       (COALESCE(rev.rev, 0) - COALESCE(exp_out.tot, 0))::int AS profit
     FROM months m
     LEFT JOIN rev ON rev.month = m.month
     LEFT JOIN exp_out ON exp_out.month = m.month
-    LEFT JOIN exp_in ON exp_in.month = m.month
     ORDER BY m.month DESC
   `;
   return rows as unknown as MonthlySummary[];
@@ -709,26 +691,15 @@ export async function getSummaryByRange(from: string, to: string, periodLabel: s
     WHERE date >= ${from}::date AND date <= ${to}::date
     AND COALESCE(flow_type, 'expense') = 'expense'
   `;
-  const inRows = await sql`
-    SELECT COALESCE(SUM(amount), 0)::int AS fund_inflow
-    FROM expenditures
-    WHERE date >= ${from}::date AND date <= ${to}::date
-    AND flow_type = 'income'
-  `;
   const exp = (expRows as unknown[])[0] as { expenditure: number };
-  const inf = (inRows as unknown[])[0] as { fund_inflow: number };
   const event_count = rev?.event_count ?? 0;
   const revenue = rev?.revenue ?? 0;
   const expenditure = exp?.expenditure ?? 0;
-  const fund_inflow = inf?.fund_inflow ?? 0;
-  const fund_net = fund_inflow - expenditure;
   return {
     period_label: periodLabel,
     event_count,
     revenue,
     expenditure,
-    fund_inflow,
-    fund_net,
     profit: revenue - expenditure,
   };
 }
@@ -949,23 +920,55 @@ export async function createInvestmentExternalBorrowIn(data: {
   return entry;
 }
 
+/** `pending_amount` = portion not yet paid (0 = no pending; full amount booked as spent). */
 export async function createInvestmentExpense(data: {
   date: string;
   expense_type: string;
   description: string;
   amount: number;
-  is_pending: boolean;
-}): Promise<{ entry?: InvestmentLedgerEntry; pending_bill?: InvestmentPendingBill }> {
+  pending_amount: number;
+}): Promise<{ entries?: InvestmentLedgerEntry[]; pending_bill?: InvestmentPendingBill }> {
   await ensureSchemaOnce();
   const sql = getSql();
-  if (data.is_pending) {
+  const total = Math.max(0, Math.floor(Number(data.amount) || 0));
+  const pending = Math.max(0, Math.floor(Number(data.pending_amount) || 0));
+  if (total <= 0) throw new Error('Amount must be positive');
+  if (pending > total) throw new Error('Pending amount cannot exceed total');
+  const immediate = total - pending;
+  const entries: InvestmentLedgerEntry[] = [];
+
+  if (immediate > 0) {
+    const rows = await sql`
+      INSERT INTO investment_ledger_entries (
+        date, direction, entry_kind, amount, expense_type, description
+      )
+      VALUES (
+        ${data.date}::date, 'out', 'expense', ${immediate},
+        ${data.expense_type.trim()},
+        ${pending > 0 ? `${data.description.trim()} (paid portion ₹${immediate} of ₹${total})` : data.description.trim()}
+      )
+      RETURNING id, date, direction, entry_kind, amount, partner_name, external_party_name,
+                external_details, expense_type, description, pending_bill_id, created_at
+    `;
+    const entry = toInvestmentLedgerEntry((rows as unknown[])[0] as Record<string, unknown>);
+    entries.push(entry);
+    await insertInvestmentAudit(sql, {
+      ref_type: 'ledger_entry',
+      ref_id: entry.id,
+      action: 'create_expense',
+      note: `${data.expense_type}: ${data.description} — spent now ₹${immediate}`,
+      amount: immediate,
+    });
+  }
+
+  if (pending > 0) {
     const billRows = await sql`
       INSERT INTO investment_pending_bills (date_incurred, expense_type, description, total_amount, amount_paid)
       VALUES (
         ${data.date}::date,
         ${data.expense_type.trim()},
         ${data.description.trim()},
-        ${data.amount},
+        ${pending},
         0
       )
       RETURNING id, date_incurred, expense_type, description, total_amount, amount_paid, created_at, updated_at
@@ -975,31 +978,13 @@ export async function createInvestmentExpense(data: {
       ref_type: 'pending_bill',
       ref_id: bill.id,
       action: 'create_pending_bill',
-      note: `${data.expense_type}: ${data.description} (total ₹${data.amount})`,
-      amount: data.amount,
+      note: `${data.expense_type}: ${data.description} (pending ₹${pending}${immediate > 0 ? ` of total ₹${total}` : ''})`,
+      amount: pending,
     });
-    return { pending_bill: bill };
+    return { entries: entries.length ? entries : undefined, pending_bill: bill };
   }
-  const rows = await sql`
-    INSERT INTO investment_ledger_entries (
-      date, direction, entry_kind, amount, expense_type, description
-    )
-    VALUES (
-      ${data.date}::date, 'out', 'expense', ${data.amount},
-      ${data.expense_type.trim()}, ${data.description.trim()}
-    )
-    RETURNING id, date, direction, entry_kind, amount, partner_name, external_party_name,
-              external_details, expense_type, description, pending_bill_id, created_at
-  `;
-  const entry = toInvestmentLedgerEntry((rows as unknown[])[0] as Record<string, unknown>);
-  await insertInvestmentAudit(sql, {
-    ref_type: 'ledger_entry',
-    ref_id: entry.id,
-    action: 'create_expense',
-    note: `${data.expense_type}: ${data.description}`,
-    amount: data.amount,
-  });
-  return { entry };
+
+  return { entries: entries.length ? entries : undefined };
 }
 
 export async function payInvestmentPendingBill(data: {

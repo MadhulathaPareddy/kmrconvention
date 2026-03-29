@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
       }
       if (!description?.trim()) {
         return NextResponse.json(
-          { error: 'Reason / notes are required for funds added' },
+          { error: 'Reason / notes are required for royalty / funds added' },
           { status: 400 }
         );
       }

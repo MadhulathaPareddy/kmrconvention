@@ -42,7 +42,7 @@ export function ExpenditureForm() {
     } else {
       setForm((f) => ({
         ...f,
-        category: 'Investment',
+        category: 'Royalty — Decor',
         event_id: '',
         category_other: '',
       }));
@@ -67,7 +67,7 @@ export function ExpenditureForm() {
       }
     } else {
       if (!form.description.trim()) {
-        setError('Reason / notes are required for funds added (investment or royalty).');
+        setError('Reason / notes are required for funds added (royalty).');
         return;
       }
       if (form.category === 'Other' && !form.category_other.trim()) {
@@ -126,7 +126,7 @@ export function ExpenditureForm() {
               : 'bg-white text-neutral-700 ring-1 ring-neutral-200 hover:bg-neutral-50'
           }`}
         >
-          Funds removed (expense)
+          Funds spent (expense)
         </button>
         <button
           type="button"
@@ -137,13 +137,13 @@ export function ExpenditureForm() {
               : 'bg-white text-neutral-700 ring-1 ring-neutral-200 hover:bg-neutral-50'
           }`}
         >
-          Funds added (investment / royalty)
+          Funds added (royalty)
         </button>
       </div>
       <p className="mb-4 text-xs text-neutral-600">
         {flow === 'expense'
-          ? 'Money leaving the hall account — shown in red in lists. Same categories as before.'
-          : 'Money coming in (investment, decor/kitchen royalty, or other) — shown in green. Reason is required.'}
+          ? 'Money leaving the hall account — shown as expense in lists. Same categories as before.'
+          : 'Decor/kitchen royalty or other inflows — shown in green. Reason is required.'}
       </p>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div>
@@ -259,7 +259,7 @@ export function ExpenditureForm() {
           disabled={submitting}
           className="rounded-md bg-seagreen px-4 py-2 text-sm font-medium text-white hover:bg-seagreen-dark disabled:opacity-50"
         >
-          {submitting ? 'Adding…' : flow === 'expense' ? 'Add expense' : 'Add to funds'}
+          {submitting ? 'Adding…' : flow === 'expense' ? 'Add expense' : 'Add royalty'}
         </button>
       </div>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
