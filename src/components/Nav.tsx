@@ -30,12 +30,14 @@ export function Nav() {
           >
             Dashboard
           </Link>
-          <Link
-            href="/events"
-            className="text-neutral-600 transition hover:text-seagreen-dark"
-          >
-            Events
-          </Link>
+          {isAdmin === true && (
+            <Link
+              href="/events"
+              className="text-neutral-600 transition hover:text-seagreen-dark"
+            >
+              Events
+            </Link>
+          )}
           {isAdmin === true && (
             <>
               <Link

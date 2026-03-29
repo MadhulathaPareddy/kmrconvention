@@ -127,6 +127,9 @@ export function InvestmentLedgerClient() {
     loading: boolean;
   } | null>(null);
 
+  const [ledgerExpanded, setLedgerExpanded] = useState(false);
+  const [pendingPeriodExpanded, setPendingPeriodExpanded] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -162,6 +165,20 @@ export function InvestmentLedgerClient() {
     }
     load();
   }, [load, range, from, to]);
+
+  useEffect(() => {
+    setLedgerExpanded(false);
+    setPendingPeriodExpanded(false);
+  }, [range, from, to]);
+
+  useEffect(() => {
+    if (!pendingModalOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setPendingModalOpen(false);
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [pendingModalOpen]);
 
   async function openAudit(title: string, refType: string, refId: string) {
     setAuditModal({ title, refType, refId, rows: null, loading: true });
@@ -338,6 +355,9 @@ export function InvestmentLedgerClient() {
   }
 
   const s = data?.summary;
+  const openPendingCount = data?.openPending?.length ?? 0;
+  const pendingInPeriodCount = data?.pendingInRange?.length ?? 0;
+  const entryCount = data?.entries?.length ?? 0;
 
   return (
     <div className="space-y-8">
@@ -681,81 +701,71 @@ export function InvestmentLedgerClient() {
         {formError && <p className="mt-2 text-sm text-red-600">{formError}</p>}
       </div>
 
-      <div>
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold text-seagreen-dark">Ledger entries (filtered period)</h2>
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold text-seagreen-dark">Lists &amp; pending</h2>
+        <p className="text-sm text-neutral-600">
+          Use the controls below to open details. Summaries above always reflect the selected period.
+        </p>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <button
             type="button"
             onClick={() => setPendingModalOpen(true)}
-            className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100"
+            aria-haspopup="dialog"
+            aria-label={`Open pending bills. ${openPendingCount} open bills.`}
+            className={`max-w-md rounded-xl border px-4 py-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-seagreen-dark focus-visible:ring-offset-2 ${
+              openPendingCount > 0
+                ? 'border-amber-500 bg-amber-100 text-amber-950 shadow-md ring-2 ring-amber-400'
+                : 'border-amber-200 bg-amber-50/90 text-amber-900 hover:bg-amber-100'
+            }`}
           >
-            Pending bills
-            {data?.openPending?.length != null ? ` (${data.openPending.length})` : ''}
+            <span className="block text-sm font-semibold">Pending bills — open balances</span>
+            <span className="mt-1 block text-xs text-amber-900/85">
+              {openPendingCount > 0
+                ? `${openPendingCount} open — click to record payments or view update history (dialog).`
+                : 'No open pending. Click to confirm in dialog.'}
+            </span>
           </button>
-        </div>
-        <div className="overflow-x-auto rounded-xl border border-seagreen-light bg-white shadow-sm">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-seagreen-light bg-seagreen-light/50">
-                <th className="px-3 py-2 font-medium text-seagreen-dark">Date</th>
-                <th className="px-3 py-2 font-medium text-seagreen-dark">Type</th>
-                <th className="px-3 py-2 font-medium text-seagreen-dark">Detail</th>
-                <th className="px-3 py-2 font-medium text-seagreen-dark">Amount</th>
-                <th className="px-3 py-2 font-medium text-seagreen-dark">History</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data?.entries?.length ?? 0) === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-neutral-500">
-                    No ledger rows in this period.
-                  </td>
-                </tr>
-              ) : (
-                data!.entries.map((e) => (
-                  <tr key={e.id} className="border-b border-neutral-100 hover:bg-seagreen-light/20">
-                    <td className="px-3 py-2 whitespace-nowrap">{formatDate(e.date)}</td>
-                    <td className="px-3 py-2">{entryLabel(e)}</td>
-                    <td className="px-3 py-2 text-neutral-600">
-                      {e.description ||
-                        e.external_details ||
-                        (e.partner_name ? `—` : '') ||
-                        '—'}
-                    </td>
-                    <td
-                      className={`px-3 py-2 font-medium ${
-                        e.direction === 'in' ? 'text-green-700' : 'text-red-700'
-                      }`}
-                    >
-                      {e.direction === 'in' ? '+' : '−'}
-                      {formatINR(e.amount)}
-                    </td>
-                    <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        onClick={() => openAudit(`Ledger line · ${formatDate(e.date)}`, 'ledger_entry', e.id)}
-                        className="text-seagreen-dark underline hover:text-seagreen"
-                      >
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
-      {(data?.pendingInRange?.length ?? 0) > 0 && (
-        <div>
-          <h2 className="mb-2 text-lg font-semibold text-seagreen-dark">
-            Pending / bills (incurred in period)
-          </h2>
-          <p className="mb-2 text-xs text-neutral-500">
-            Bills whose incurred date falls in the selected period (includes settled if paid within workflow).
-          </p>
-          <div className="overflow-x-auto rounded-xl border border-seagreen-light bg-white shadow-sm">
+          {pendingInPeriodCount > 0 && (
+            <button
+              type="button"
+              aria-expanded={pendingPeriodExpanded}
+              aria-controls="investment-pending-period-panel"
+              onClick={() => setPendingPeriodExpanded((v) => !v)}
+              className="max-w-md rounded-xl border border-seagreen-light bg-white px-4 py-3 text-left shadow-sm transition hover:bg-seagreen-light/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-seagreen-dark focus-visible:ring-offset-2"
+            >
+              <span className="flex items-start gap-2">
+                <span className="mt-0.5 font-mono text-seagreen-dark" aria-hidden>
+                  {pendingPeriodExpanded ? '▼' : '▶'}
+                </span>
+                <span>
+                  <span className="block text-sm font-semibold text-seagreen-dark">
+                    Bills incurred in this period
+                  </span>
+                  <span className="mt-1 block text-xs text-neutral-600">
+                    {pendingInPeriodCount} bill{pendingInPeriodCount !== 1 ? 's' : ''} with date in range —{' '}
+                    <span className="font-medium text-seagreen-dark">
+                      {pendingPeriodExpanded ? 'click to hide table' : 'click to show full table'}
+                    </span>
+                    .
+                  </span>
+                </span>
+              </span>
+            </button>
+          )}
+        </div>
+
+        {pendingPeriodExpanded && pendingInPeriodCount > 0 && data && (
+          <div
+            id="investment-pending-period-panel"
+            role="region"
+            aria-label="Bills whose incurred date falls in the selected period"
+            className="overflow-x-auto rounded-xl border border-seagreen-light bg-white shadow-sm"
+          >
+            <p className="border-b border-seagreen-light bg-seagreen-light/40 px-3 py-2 text-xs text-neutral-700">
+              Includes open and settled bills dated in this period.
+            </p>
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead>
                 <tr className="border-b border-seagreen-light bg-seagreen-light/50">
@@ -770,7 +780,7 @@ export function InvestmentLedgerClient() {
                 </tr>
               </thead>
               <tbody>
-                {data!.pendingInRange.map((b) => (
+                {data.pendingInRange.map((b) => (
                   <tr key={b.id} className="border-b border-neutral-100">
                     <td className="px-3 py-2 whitespace-nowrap">{formatDate(b.date_incurred)}</td>
                     <td className="px-3 py-2">{b.expense_type}</td>
@@ -793,7 +803,7 @@ export function InvestmentLedgerClient() {
                         onClick={() =>
                           openAudit(`Bill · ${b.expense_type}`, 'pending_bill', b.id)
                         }
-                        className="text-seagreen-dark underline hover:text-seagreen"
+                        className="text-seagreen-dark underline hover:text-seagreen focus:outline-none focus-visible:ring-2 focus-visible:ring-seagreen"
                       >
                         Updates
                       </button>
@@ -803,15 +813,113 @@ export function InvestmentLedgerClient() {
               </tbody>
             </table>
           </div>
+        )}
+
+        <div className="overflow-hidden rounded-xl border border-seagreen-light bg-white shadow-sm">
+          <button
+            type="button"
+            aria-expanded={ledgerExpanded}
+            aria-controls="investment-ledger-entries-panel"
+            onClick={() => setLedgerExpanded((v) => !v)}
+            className="flex w-full items-center gap-3 px-4 py-4 text-left transition hover:bg-seagreen-light/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-seagreen-dark"
+          >
+            <span className="shrink-0 font-mono text-seagreen-dark" aria-hidden>
+              {ledgerExpanded ? '▼' : '▶'}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-base font-semibold text-seagreen-dark">
+                Ledger entries for this period
+              </span>
+              <span className="mt-1 block text-sm text-neutral-600">
+                {entryCount === 0
+                  ? 'No rows in this period. Expand to see the empty state.'
+                  : `${entryCount} row${entryCount !== 1 ? 's' : ''}. Click to ${ledgerExpanded ? 'collapse the table' : 'show the complete list for this period'}.`}
+              </span>
+            </span>
+          </button>
+
+          {ledgerExpanded && (
+            <div
+              id="investment-ledger-entries-panel"
+              role="region"
+              aria-label="Investment ledger entries for the selected period"
+              className="border-t border-seagreen-light"
+            >
+              <div className="overflow-x-auto">
+                {!data ? (
+                  <p className="px-4 py-6 text-sm text-neutral-500">Loading…</p>
+                ) : (
+                <table className="w-full min-w-[640px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-seagreen-light bg-seagreen-light/50">
+                      <th className="px-3 py-2 font-medium text-seagreen-dark">Date</th>
+                      <th className="px-3 py-2 font-medium text-seagreen-dark">Type</th>
+                      <th className="px-3 py-2 font-medium text-seagreen-dark">Detail</th>
+                      <th className="px-3 py-2 font-medium text-seagreen-dark">Amount</th>
+                      <th className="px-3 py-2 font-medium text-seagreen-dark">History</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entryCount === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-8 text-center text-neutral-500">
+                          No ledger rows in this period.
+                        </td>
+                      </tr>
+                    ) : (
+                      data.entries.map((e) => (
+                        <tr key={e.id} className="border-b border-neutral-100 hover:bg-seagreen-light/20">
+                          <td className="px-3 py-2 whitespace-nowrap">{formatDate(e.date)}</td>
+                          <td className="px-3 py-2">{entryLabel(e)}</td>
+                          <td className="px-3 py-2 text-neutral-600">
+                            {e.description ||
+                              e.external_details ||
+                              (e.partner_name ? `—` : '') ||
+                              '—'}
+                          </td>
+                          <td
+                            className={`px-3 py-2 font-medium ${
+                              e.direction === 'in' ? 'text-green-700' : 'text-red-700'
+                            }`}
+                          >
+                            {e.direction === 'in' ? '+' : '−'}
+                            {formatINR(e.amount)}
+                          </td>
+                          <td className="px-3 py-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openAudit(`Ledger line · ${formatDate(e.date)}`, 'ledger_entry', e.id)
+                              }
+                              className="text-seagreen-dark underline hover:text-seagreen focus:outline-none focus-visible:ring-2 focus-visible:ring-seagreen"
+                            >
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+                )}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       {pendingModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="presentation"
+          onClick={() => setPendingModalOpen(false)}
+        >
           <div
             className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
             role="dialog"
+            aria-modal="true"
             aria-labelledby="pending-title"
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-4 flex items-center justify-between">
               <h3 id="pending-title" className="text-lg font-semibold text-seagreen-dark">
@@ -820,7 +928,8 @@ export function InvestmentLedgerClient() {
               <button
                 type="button"
                 onClick={() => setPendingModalOpen(false)}
-                className="text-neutral-500 hover:text-neutral-800"
+                className="rounded-md px-2 py-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-seagreen"
+                aria-label="Close pending bills dialog"
               >
                 Close
               </button>

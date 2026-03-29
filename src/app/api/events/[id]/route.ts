@@ -1,15 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getEventById, updateEvent, deleteEvent } from '@/lib/db';
 import { isAdmin } from '@/lib/auth';
+import { toPublicEventPayload } from '@/lib/publicEvent';
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const admin = await isAdmin();
     const { id } = await params;
     const event = await getEventById(id);
     if (!event) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    if (!admin) {
+      const today = new Date().toISOString().slice(0, 10);
+      if (event.date < today) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      return NextResponse.json(toPublicEventPayload(event));
+    }
     return NextResponse.json(event);
   } catch (e) {
     console.error(e);

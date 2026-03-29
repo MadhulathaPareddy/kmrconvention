@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getEvents, createEvent } from '@/lib/db';
+import { getEvents, createEvent, getUpcomingEvents } from '@/lib/db';
 import { isAdmin } from '@/lib/auth';
+import { toPublicEventPayload } from '@/lib/publicEvent';
 
 function getDateRangeForFilter(filter: string | null): { from?: string; to?: string } {
   if (!filter || filter === 'all') return {};
@@ -31,7 +32,13 @@ function getDateRangeForFilter(filter: string | null): { from?: string; to?: str
 
 export async function GET(req: NextRequest) {
   try {
+    const admin = await isAdmin();
     const { searchParams } = new URL(req.url);
+    if (!admin) {
+      const today = new Date().toISOString().slice(0, 10);
+      const events = await getUpcomingEvents(today);
+      return NextResponse.json(events.map(toPublicEventPayload));
+    }
     let from = searchParams.get('from') ?? undefined;
     let to = searchParams.get('to') ?? undefined;
     const filter = searchParams.get('filter');

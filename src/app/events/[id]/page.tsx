@@ -1,7 +1,8 @@
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getEventById } from '@/lib/db';
 import { formatINR, formatDate } from '@/lib/format';
+import { isAdmin } from '@/lib/auth';
 import { CommentsSection } from './CommentsSection';
 import { EditEventButton } from './EditEventButton';
 import { EventHistorySection } from './EventHistorySection';
@@ -14,6 +15,10 @@ export default async function EventDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const admin = await isAdmin();
+  if (!admin) {
+    redirect('/');
+  }
   const { id } = await params;
   const event = await getEventById(id);
   if (!event) notFound();

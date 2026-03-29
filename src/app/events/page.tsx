@@ -1,6 +1,8 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { getEvents } from '@/lib/db';
 import { formatINR, formatDate } from '@/lib/format';
+import { isAdmin } from '@/lib/auth';
 import { EventsFilterTabs } from './EventsFilterTabs';
 
 export const dynamic = 'force-dynamic';
@@ -30,6 +32,10 @@ export default async function EventsPage({
 }: {
   searchParams: Promise<{ added?: string; filter?: string }>;
 }) {
+  const admin = await isAdmin();
+  if (!admin) {
+    redirect('/');
+  }
   const { added, filter } = await searchParams;
   const { from, to } = getDateRangeForFilter(filter ?? 'all');
   const events = await getEvents(from, to);
