@@ -43,6 +43,8 @@ export interface EventHistoryEntry {
   event_id: string;
   snapshot_before: Record<string, unknown>;
   changed_at: string;
+  /** Admin note explaining why the update was made (required on new edits). */
+  change_comment: string | null;
 }
 
 export type ExpenditureFlow = 'expense' | 'income';

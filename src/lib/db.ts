@@ -124,6 +124,18 @@ async function ensureSchemaOnce(): Promise<void> {
         )
       `;
       await sql`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'event_history'
+              AND column_name = 'change_comment'
+          ) THEN
+            ALTER TABLE event_history ADD COLUMN change_comment TEXT;
+          END IF;
+        END $$
+      `;
+      await sql`
         CREATE TABLE IF NOT EXISTS expenditure_deletions (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           expenditure_id UUID NOT NULL,
@@ -355,8 +367,11 @@ export async function createEvent(data: {
   return event!;
 }
 
+const CHANGE_COMMENT_REQUIRED_MSG = 'A short comment explaining this change is required';
+
 export async function updateEvent(
   id: string,
+  changeComment: string,
   data: Partial<{
     date: string;
     event_type: string;
@@ -370,6 +385,10 @@ export async function updateEvent(
     notes: string;
   }>
 ): Promise<Event | null> {
+  const trimmedComment = typeof changeComment === 'string' ? changeComment.trim() : '';
+  if (!trimmedComment) {
+    throw new Error(CHANGE_COMMENT_REQUIRED_MSG);
+  }
   const event = await getEventById(id);
   if (!event) return null;
   await ensureSchemaOnce();
@@ -389,8 +408,8 @@ export async function updateEvent(
     updated_at: event.updated_at,
   };
   await sql`
-    INSERT INTO event_history (event_id, snapshot_before)
-    VALUES (${id}::uuid, ${JSON.stringify(snapshotBefore)}::jsonb)
+    INSERT INTO event_history (event_id, snapshot_before, change_comment)
+    VALUES (${id}::uuid, ${JSON.stringify(snapshotBefore)}::jsonb, ${trimmedComment})
   `;
   const dieselType = data.diesel_type !== undefined ? data.diesel_type : (data.diesel_included ? 'KMR' : event.diesel_type);
   const prevHadDiesel = event.diesel_type === 'KMR' || event.diesel_type === 'GUEST';
@@ -476,7 +495,7 @@ export async function getEventHistory(eventId: string): Promise<EventHistoryEntr
   await ensureSchemaOnce();
   const sql = getSql();
   const rows = await sql`
-    SELECT id, event_id, snapshot_before, changed_at
+    SELECT id, event_id, snapshot_before, changed_at, change_comment
     FROM event_history WHERE event_id = ${eventId}::uuid
     ORDER BY changed_at DESC
   `;
@@ -487,8 +506,26 @@ export async function getEventHistory(eventId: string): Promise<EventHistoryEntr
       event_id: String(row.event_id),
       snapshot_before: (row.snapshot_before as Record<string, unknown>) || {},
       changed_at: String(row.changed_at),
+      change_comment: row.change_comment != null ? String(row.change_comment) : null,
     };
   }) as EventHistoryEntry[];
+}
+
+/** Per-event count of update-history rows (for list UI). */
+export async function getEventHistoryCounts(): Promise<Map<string, number>> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT event_id::text AS eid, COUNT(*)::int AS c
+    FROM event_history
+    GROUP BY event_id
+  `;
+  const m = new Map<string, number>();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const row = r as Record<string, unknown>;
+    m.set(String(row.eid), Number(row.c) || 0);
+  }
+  return m;
 }
 
 function toExpenditure(row: Record<string, unknown>): Expenditure {

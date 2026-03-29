@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getEvents } from '@/lib/db';
+import { getEvents, getEventHistoryCounts } from '@/lib/db';
 import { formatINR, formatDate } from '@/lib/format';
 import { isAdmin } from '@/lib/auth';
 import { EventsFilterTabs } from './EventsFilterTabs';
+import { ViewEventChangesButton } from './ViewEventChangesButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +40,7 @@ export default async function EventsPage({
   const { added, filter } = await searchParams;
   const { from, to } = getDateRangeForFilter(filter ?? 'all');
   const events = await getEvents(from, to);
+  const historyCounts = await getEventHistoryCounts();
 
   return (
     <div className="space-y-6">
@@ -67,6 +69,7 @@ export default async function EventsPage({
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Kitchen</th>
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Diesel ₹</th>
                 <th className="px-4 py-3 font-medium text-seagreen-dark">Incl_Diesel</th>
+                <th className="px-4 py-3 font-medium text-seagreen-dark">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -105,6 +108,19 @@ export default async function EventsPage({
                     ) : (
                       '—'
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        href={`/admin/events/${ev.id}/edit`}
+                        className="rounded-md border border-seagreen-light bg-seagreen px-2.5 py-1 text-xs font-medium text-white hover:bg-seagreen-dark"
+                      >
+                        Edit
+                      </Link>
+                      {(historyCounts.get(ev.id) ?? 0) > 0 ? (
+                        <ViewEventChangesButton eventId={ev.id} />
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}

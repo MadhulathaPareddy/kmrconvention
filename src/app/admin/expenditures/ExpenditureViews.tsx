@@ -2,10 +2,8 @@
 
 import { useState } from 'react';
 import { formatINR, formatDate } from '@/lib/format';
-import type { Expenditure, Event, ExpenditureDeletion } from '@/lib/types';
+import type { Expenditure, Event } from '@/lib/types';
 import { DeleteExpenditureButton } from './DeleteExpenditureButton';
-
-type ListExp = Expenditure & { deleteReason?: string };
 
 function formatMonth(monthKey: string): string {
   const [y, m] = monthKey.split('-');
@@ -13,15 +11,15 @@ function formatMonth(monthKey: string): string {
   return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 }
 
-function sumOutActive(items: ListExp[]): number {
+function sumOutActive(items: Expenditure[]): number {
   return items
-    .filter((x) => !x.deleteReason && x.flow_type !== 'income')
+    .filter((x) => x.flow_type !== 'income')
     .reduce((s, x) => s + Number(x.amount), 0);
 }
 
-function sumInActive(items: ListExp[]): number {
+function sumInActive(items: Expenditure[]): number {
   return items
-    .filter((x) => !x.deleteReason && x.flow_type === 'income')
+    .filter((x) => x.flow_type === 'income')
     .reduce((s, x) => s + Number(x.amount), 0);
 }
 
@@ -57,49 +55,11 @@ function normalizeExpenditure(ex: Partial<Expenditure> | null): Expenditure | nu
   };
 }
 
-function parseDeletionRow(d: ExpenditureDeletion): ListExp | null {
-  const s = d.snapshot as Record<string, unknown>;
-  if (s == null || typeof s !== 'object') return null;
-  let dateStr = '';
-  try {
-    const dv = s.date;
-    dateStr =
-      typeof dv === 'string'
-        ? dv.slice(0, 10)
-        : dv != null
-          ? new Date(dv as string | number).toISOString().slice(0, 10)
-          : '';
-  } catch {
-    return null;
-  }
-  if (!dateStr) return null;
-  const ex = normalizeExpenditure({
-    id: `deleted-row-${d.id}`,
-    date: dateStr,
-    amount: s.amount != null ? Number(s.amount) : 0,
-    category: s.category != null ? String(s.category) : '',
-    description: s.description != null ? String(s.description) : null,
-    event_id: s.event_id != null ? String(s.event_id) : null,
-    category_other: s.category_other != null ? String(s.category_other) : null,
-    flow_type: s.flow_type === 'income' ? 'income' : 'expense',
-    created_at: s.created_at != null ? String(s.created_at) : undefined,
-  });
-  if (!ex) return null;
-  return { ...ex, deleteReason: d.reason };
-}
-
-function sortByDateDesc(items: ListExp[]): ListExp[] {
+function sortByDateDesc(items: Expenditure[]): Expenditure[] {
   return [...items].sort((a, b) => String(b.date).localeCompare(String(a.date)));
 }
 
-function flowBadge(ex: ListExp) {
-  if (ex.deleteReason) {
-    return (
-      <span className="rounded bg-neutral-200 px-2 py-0.5 text-xs font-medium text-neutral-800">
-        Deleted
-      </span>
-    );
-  }
+function flowBadge(ex: Expenditure) {
   if (ex.flow_type === 'income') {
     return (
       <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
@@ -112,20 +72,7 @@ function flowBadge(ex: ListExp) {
   );
 }
 
-function descriptionCell(ex: ListExp) {
-  if (ex.deleteReason) {
-    return (
-      <div className="max-w-xs">
-        <p className="text-neutral-500 line-through">{ex.description || '—'}</p>
-        <p className="mt-1 text-xs font-medium text-amber-900">Removal reason: {ex.deleteReason}</p>
-      </div>
-    );
-  }
-  return <span className="text-neutral-700">{ex.description || '—'}</span>;
-}
-
-function amountClass(ex: ListExp): string {
-  if (ex.deleteReason) return 'px-4 py-2 font-medium text-neutral-500 line-through';
+function amountClass(ex: Expenditure): string {
   return ex.flow_type === 'income'
     ? 'px-4 py-2 font-medium text-green-700'
     : 'px-4 py-2 font-medium text-red-700';
@@ -134,11 +81,9 @@ function amountClass(ex: ListExp): string {
 export function ExpenditureViews({
   expenditures = [],
   events = [],
-  deletions = [],
 }: {
   expenditures?: Expenditure[] | null;
   events?: Event[] | null;
-  deletions?: ExpenditureDeletion[] | null;
 }) {
   const [view, setView] = useState<'monthly' | 'event' | 'yearly'>('monthly');
 
@@ -146,25 +91,16 @@ export function ExpenditureViews({
     .map(normalizeExpenditure)
     .filter((ex): ex is Expenditure => ex != null);
 
-  const deletionRows = (Array.isArray(deletions) ? deletions : [])
-    .map(parseDeletionRow)
-    .filter((x): x is ListExp => x != null);
-
-  const allItems: ListExp[] = [
-    ...safeExpenditures.map((e) => ({ ...e })),
-    ...deletionRows,
-  ];
-
-  const byMonth = new Map<string, ListExp[]>();
-  const byEvent = new Map<string | 'none', ListExp[]>();
-  const byYear = new Map<number, ListExp[]>();
+  const byMonth = new Map<string, Expenditure[]>();
+  const byEvent = new Map<string | 'none', Expenditure[]>();
+  const byYear = new Map<number, Expenditure[]>();
   const eventMap = new Map(
     (Array.isArray(events) ? events : [])
       .filter((e) => e != null && (e as Event).id != null)
       .map((e) => [(e as Event).id, e as Event])
   );
 
-  for (const ex of allItems) {
+  for (const ex of safeExpenditures) {
     const monthKey = ex.date ? ex.date.slice(0, 7) : '';
     if (monthKey) {
       if (!byMonth.has(monthKey)) byMonth.set(monthKey, []);
@@ -183,8 +119,8 @@ export function ExpenditureViews({
   const sortedMonths = Array.from(byMonth.keys()).sort().reverse();
   const sortedYears = Array.from(byYear.keys()).sort((a, b) => b - a);
 
-  const allOut = sumOutActive(allItems);
-  const allIn = sumInActive(allItems);
+  const allOut = sumOutActive(safeExpenditures);
+  const allIn = sumInActive(safeExpenditures);
   const balance = allIn - allOut;
 
   return (
@@ -193,8 +129,9 @@ export function ExpenditureViews({
         <h3 className="text-sm font-semibold text-seagreen-dark">Fund balance (active rows only)</h3>
         <p className="mt-1 text-xs text-neutral-500">
           Booking revenue (and tagged royalty totals for Summary) are on the Dashboard / Summary. Totals
-          below exclude deleted rows; removed entries still appear in the tables with reason. Royalties are
-          funds added; tag an event on a royalty line to count it toward that event and Summary revenue.
+          below are from active expenditure rows only. Removed lines are listed under &quot;Deleted
+          expenses&quot; on the card above. Royalties are funds added; tag an event on a royalty line
+          to count it toward that event and Summary revenue.
         </p>
         <div className="mt-3 flex flex-wrap gap-6 text-sm">
           <div>
@@ -293,10 +230,7 @@ export function ExpenditureViews({
                     </thead>
                     <tbody>
                       {items.map((ex) => (
-                        <tr
-                          key={ex.id}
-                          className={`border-b border-neutral-50 last:border-0 ${ex.deleteReason ? 'bg-neutral-50/80' : ''}`}
-                        >
+                        <tr key={ex.id} className="border-b border-neutral-50 last:border-0">
                           <td className="px-4 py-2">{formatDate(ex.date)}</td>
                           <td className="px-4 py-2">{flowBadge(ex)}</td>
                           <td className="px-4 py-2 text-neutral-600">
@@ -307,10 +241,12 @@ export function ExpenditureViews({
                               : '—'}
                           </td>
                           <td className="px-4 py-2">{catLabel(ex)}</td>
-                          <td className="px-4 py-2 text-sm">{descriptionCell(ex)}</td>
+                          <td className="px-4 py-2 text-sm text-neutral-700">
+                            {ex.description || '—'}
+                          </td>
                           <td className={amountClass(ex)}>{formatINR(ex.amount)}</td>
                           <td className="px-4 py-2">
-                            {!ex.deleteReason ? <DeleteExpenditureButton id={ex.id} /> : '—'}
+                            <DeleteExpenditureButton id={ex.id} />
                           </td>
                         </tr>
                       ))}
@@ -379,17 +315,16 @@ export function ExpenditureViews({
                       </thead>
                       <tbody>
                         {items.map((ex) => (
-                          <tr
-                            key={ex.id}
-                            className={`border-b border-neutral-50 last:border-0 ${ex.deleteReason ? 'bg-neutral-50/80' : ''}`}
-                          >
+                          <tr key={ex.id} className="border-b border-neutral-50 last:border-0">
                             <td className="px-4 py-2">{formatDate(ex.date)}</td>
                             <td className="px-4 py-2">{flowBadge(ex)}</td>
                             <td className="px-4 py-2">{catLabel(ex)}</td>
-                            <td className="px-4 py-2 text-sm">{descriptionCell(ex)}</td>
+                            <td className="px-4 py-2 text-sm text-neutral-700">
+                              {ex.description || '—'}
+                            </td>
                             <td className={amountClass(ex)}>{formatINR(ex.amount)}</td>
                             <td className="px-4 py-2">
-                              {!ex.deleteReason ? <DeleteExpenditureButton id={ex.id} /> : '—'}
+                              <DeleteExpenditureButton id={ex.id} />
                             </td>
                           </tr>
                         ))}
@@ -443,10 +378,7 @@ export function ExpenditureViews({
                     </thead>
                     <tbody>
                       {items.map((ex) => (
-                        <tr
-                          key={ex.id}
-                          className={`border-b border-neutral-50 last:border-0 ${ex.deleteReason ? 'bg-neutral-50/80' : ''}`}
-                        >
+                        <tr key={ex.id} className="border-b border-neutral-50 last:border-0">
                           <td className="px-4 py-2">{formatDate(ex.date)}</td>
                           <td className="px-4 py-2">{flowBadge(ex)}</td>
                           <td className="px-4 py-2 text-neutral-600">
@@ -457,10 +389,12 @@ export function ExpenditureViews({
                               : '—'}
                           </td>
                           <td className="px-4 py-2">{catLabel(ex)}</td>
-                          <td className="px-4 py-2 text-sm">{descriptionCell(ex)}</td>
+                          <td className="px-4 py-2 text-sm text-neutral-700">
+                            {ex.description || '—'}
+                          </td>
                           <td className={amountClass(ex)}>{formatINR(ex.amount)}</td>
                           <td className="px-4 py-2">
-                            {!ex.deleteReason ? <DeleteExpenditureButton id={ex.id} /> : '—'}
+                            <DeleteExpenditureButton id={ex.id} />
                           </td>
                         </tr>
                       ))}

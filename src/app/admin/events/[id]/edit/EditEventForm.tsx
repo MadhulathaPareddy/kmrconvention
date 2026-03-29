@@ -10,6 +10,7 @@ export function EditEventForm({ event }: { event: Event }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [changeComment, setChangeComment] = useState('');
   const [form, setForm] = useState({
     date: event.date?.slice(0, 10) ?? '',
     event_type: event.event_type ?? 'Marriage',
@@ -208,6 +209,20 @@ export function EditEventForm({ event }: { event: Event }) {
             value={form.notes}
             onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
             className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
+          />
+        </div>
+        <div>
+          <label htmlFor="change_comment" className="block text-sm font-medium text-neutral-700">
+            Change comment *
+          </label>
+          <textarea
+            id="change_comment"
+            rows={2}
+            value={changeComment}
+            onChange={(e) => setChangeComment(e.target.value)}
+            placeholder="Why are you saving these changes? (required for audit)"
+            className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-2"
+            required
           />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}

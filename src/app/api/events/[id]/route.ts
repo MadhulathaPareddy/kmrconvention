@@ -37,7 +37,15 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await req.json();
-    const event = await updateEvent(id, {
+    const changeComment =
+      typeof body.change_comment === 'string' ? body.change_comment.trim() : '';
+    if (!changeComment) {
+      return NextResponse.json(
+        { error: 'A short comment explaining this change is required' },
+        { status: 400 }
+      );
+    }
+    const event = await updateEvent(id, changeComment, {
       date: body.date,
       event_type: body.event_type,
       contact_info: body.contact_info,
@@ -53,6 +61,9 @@ export async function PATCH(
     return NextResponse.json(event);
   } catch (e) {
     console.error(e);
+    if (e instanceof Error && e.message === 'A short comment explaining this change is required') {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
     return NextResponse.json({ error: 'Failed to update event' }, { status: 500 });
   }
 }
