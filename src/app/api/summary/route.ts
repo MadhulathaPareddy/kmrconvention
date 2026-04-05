@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMonthlySummaries, getSummaryWithBreakdown } from '@/lib/db';
 import { isAdmin } from '@/lib/auth';
-import { istYmd, istWeekRangeFrom, istMonthRangeFrom } from '@/lib/ist';
+import { istYmd, istWeekRangeFrom, istMonthRangeFrom, istRangeForYm, istMonthLabelLong } from '@/lib/ist';
 
 function getDateRangeForSummary(
   range: string | null,
@@ -49,6 +49,23 @@ export async function GET(req: NextRequest) {
     const range = searchParams.get('range');
     const fromParam = searchParams.get('from');
     const toParam = searchParams.get('to');
+
+    if (range === 'calendar_month') {
+      const ym = searchParams.get('ym');
+      if (!ym) {
+        return NextResponse.json({ error: 'ym is required (YYYY-MM)' }, { status: 400 });
+      }
+      const bounds = istRangeForYm(ym);
+      if (!bounds) {
+        return NextResponse.json({ error: 'Invalid ym' }, { status: 400 });
+      }
+      const row = await getSummaryWithBreakdown(
+        bounds.from,
+        bounds.to,
+        istMonthLabelLong(ym)
+      );
+      return NextResponse.json(row);
+    }
 
     if (range && range !== 'year') {
       const dateRange = getDateRangeForSummary(range, fromParam, toParam);

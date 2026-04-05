@@ -80,6 +80,34 @@ export function istMonthRangeFrom(date: Date = new Date()): { from: string; to: 
   return { from, to };
 }
 
+const YM_RE = /^(\d{4})-(\d{2})$/;
+
+/** Inclusive date range for a calendar month string `YYYY-MM` (same boundaries as IST month picker). */
+export function istRangeForYm(ym: string): { from: string; to: string } | null {
+  const m = YM_RE.exec(ym.trim());
+  if (!m) return null;
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10);
+  if (mo < 1 || mo > 12) return null;
+  const from = `${m[1]}-${m[2]}-01`;
+  const lastDay = new Date(y, mo, 0).getDate();
+  const to = `${m[1]}-${m[2]}-${pad2(lastDay)}`;
+  return { from, to };
+}
+
+/** Display label e.g. "March 2026" for `YYYY-MM`, using IST for formatting. */
+export function istMonthLabelLong(ym: string): string {
+  const r = istRangeForYm(ym);
+  if (!r) return ym;
+  const mo = parseInt(ym.slice(5, 7), 10);
+  const y = parseInt(ym.slice(0, 4), 10);
+  return new Intl.DateTimeFormat('en-IN', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: IST_TIME_ZONE,
+  }).format(new Date(y, mo - 1, 15));
+}
+
 /** Events list filter: week / month in IST. */
 export function istEventsFilterRange(filter: string | null): { from?: string; to?: string } {
   if (!filter || filter === 'all') return {};

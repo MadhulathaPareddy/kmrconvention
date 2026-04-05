@@ -229,3 +229,69 @@ export interface LoanAccountDashboard {
   loan_balance: number;
   other_account_balance: number;
 }
+
+/** New investment ledger UI (separate from legacy `investment_ledger_entries`). */
+export interface LedgerPartnerInvestment {
+  id: string;
+  partner_name: string;
+  amount: number;
+  note: string;
+  entry_date: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LedgerBorrowedRepayment {
+  id: string;
+  borrowed_fund_id: string;
+  amount: number;
+  note: string;
+  payment_date: string;
+  created_at: string;
+}
+
+export interface LedgerBorrowedFund {
+  id: string;
+  party_name: string;
+  principal: number;
+  details: string;
+  entry_date: string;
+  created_at: string;
+  updated_at: string;
+  total_repaid: number;
+  balance: number;
+  repayments: LedgerBorrowedRepayment[];
+}
+
+export interface LedgerFundsSpent {
+  id: string;
+  amount: number;
+  category: string;
+  description: string;
+  note: string;
+  spent_date: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LedgerPendingPayment {
+  id: string;
+  amount: number;
+  description: string;
+  note: string;
+  incurred_date: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LedgerCollectionsDashboard {
+  partners: { total: number; entries: LedgerPartnerInvestment[] };
+  borrowed: {
+    total_principal: number;
+    total_repaid: number;
+    total_balance: number;
+    entries: LedgerBorrowedFund[];
+  };
+  spent: { total: number; entries: LedgerFundsSpent[] };
+  pending: { total: number; entries: LedgerPendingPayment[] };
+}

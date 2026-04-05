@@ -13,6 +13,12 @@ import type {
   LoanAccountEntry,
   LoanAccountEntryKind,
   LoanAccountDashboard,
+  LedgerPartnerInvestment,
+  LedgerBorrowedFund,
+  LedgerBorrowedRepayment,
+  LedgerFundsSpent,
+  LedgerPendingPayment,
+  LedgerCollectionsDashboard,
   InvestmentLedgerEntry,
   InvestmentPendingBill,
   InvestmentLedgerAuditRow,
@@ -215,6 +221,65 @@ async function ensureSchemaOnce(): Promise<void> {
           event_id UUID REFERENCES events(id) ON DELETE SET NULL,
           amount INTEGER NOT NULL CHECK (amount > 0),
           note TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS ledger_partner_investments (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          partner_name VARCHAR(100) NOT NULL,
+          amount INTEGER NOT NULL CHECK (amount > 0),
+          note TEXT NOT NULL DEFAULT '',
+          entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS ledger_borrowed_funds (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          party_name TEXT NOT NULL,
+          principal INTEGER NOT NULL CHECK (principal > 0),
+          details TEXT NOT NULL DEFAULT '',
+          entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS ledger_borrowed_repayments (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          borrowed_fund_id UUID NOT NULL REFERENCES ledger_borrowed_funds(id) ON DELETE CASCADE,
+          amount INTEGER NOT NULL CHECK (amount > 0),
+          note TEXT NOT NULL DEFAULT '',
+          payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS ledger_borrowed_repayments_borrowed_fund_id_idx
+        ON ledger_borrowed_repayments (borrowed_fund_id)
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS ledger_funds_spent (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          amount INTEGER NOT NULL CHECK (amount > 0),
+          category VARCHAR(200) NOT NULL DEFAULT '',
+          description TEXT NOT NULL DEFAULT '',
+          note TEXT NOT NULL DEFAULT '',
+          spent_date DATE NOT NULL DEFAULT CURRENT_DATE,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS ledger_pending_payments (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          amount INTEGER NOT NULL CHECK (amount > 0),
+          description TEXT NOT NULL DEFAULT '',
+          note TEXT NOT NULL DEFAULT '',
+          incurred_date DATE NOT NULL DEFAULT CURRENT_DATE,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           updated_at TIMESTAMPTZ DEFAULT NOW()
         )
@@ -1120,6 +1185,431 @@ export async function deleteLoanAccountEntry(id: string): Promise<boolean> {
   await ensureSchemaOnce();
   const sql = getSql();
   const del = await sql`DELETE FROM loan_account_entries WHERE id = ${id}::uuid RETURNING id`;
+  return (del as unknown[]).length > 0;
+}
+
+// --- Ledger collections (new investment ledger UI; not `investment_ledger_entries`) ---
+
+function toLedgerPartnerInvestment(r: Record<string, unknown>): LedgerPartnerInvestment {
+  return {
+    id: String(r.id),
+    partner_name: String(r.partner_name ?? ''),
+    amount: num(r, 'amount'),
+    note: String(r.note ?? ''),
+    entry_date: pgDateToYmd(r.entry_date),
+    created_at: String(r.created_at),
+    updated_at: String(r.updated_at),
+  };
+}
+
+function toLedgerBorrowedRepayment(r: Record<string, unknown>): LedgerBorrowedRepayment {
+  return {
+    id: String(r.id),
+    borrowed_fund_id: String(r.borrowed_fund_id),
+    amount: num(r, 'amount'),
+    note: String(r.note ?? ''),
+    payment_date: pgDateToYmd(r.payment_date),
+    created_at: String(r.created_at),
+  };
+}
+
+function toLedgerFundsSpent(r: Record<string, unknown>): LedgerFundsSpent {
+  return {
+    id: String(r.id),
+    amount: num(r, 'amount'),
+    category: String(r.category ?? ''),
+    description: String(r.description ?? ''),
+    note: String(r.note ?? ''),
+    spent_date: pgDateToYmd(r.spent_date),
+    created_at: String(r.created_at),
+    updated_at: String(r.updated_at),
+  };
+}
+
+function toLedgerPendingPayment(r: Record<string, unknown>): LedgerPendingPayment {
+  return {
+    id: String(r.id),
+    amount: num(r, 'amount'),
+    description: String(r.description ?? ''),
+    note: String(r.note ?? ''),
+    incurred_date: pgDateToYmd(r.incurred_date),
+    created_at: String(r.created_at),
+    updated_at: String(r.updated_at),
+  };
+}
+
+export async function getLedgerCollectionsDashboard(): Promise<LedgerCollectionsDashboard> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+
+  const pr = await sql`
+    SELECT id, partner_name, amount, note, entry_date, created_at, updated_at
+    FROM ledger_partner_investments
+    ORDER BY entry_date DESC, created_at DESC
+  `;
+  const partnerEntries = (Array.isArray(pr) ? pr : []).map((r) =>
+    toLedgerPartnerInvestment(r as Record<string, unknown>)
+  );
+  const partnersTotal = partnerEntries.reduce((s, e) => s + e.amount, 0);
+
+  const br = await sql`
+    SELECT id, party_name, principal, details, entry_date, created_at, updated_at
+    FROM ledger_borrowed_funds
+    ORDER BY entry_date DESC, created_at DESC
+  `;
+  const borrowRows = Array.isArray(br) ? br : [];
+  const repAll = await sql`
+    SELECT id, borrowed_fund_id, amount, note, payment_date, created_at
+    FROM ledger_borrowed_repayments
+    ORDER BY payment_date DESC, created_at DESC
+  `;
+  const repayments = (Array.isArray(repAll) ? repAll : []).map((r) =>
+    toLedgerBorrowedRepayment(r as Record<string, unknown>)
+  );
+  const repByBorrow = new Map<string, LedgerBorrowedRepayment[]>();
+  for (const rp of repayments) {
+    const list = repByBorrow.get(rp.borrowed_fund_id) ?? [];
+    list.push(rp);
+    repByBorrow.set(rp.borrowed_fund_id, list);
+  }
+
+  let totalPrincipal = 0;
+  let totalRepaidAll = 0;
+  const borrowedEntries: LedgerBorrowedFund[] = borrowRows.map((raw) => {
+    const r = raw as Record<string, unknown>;
+    const id = String(r.id);
+    const principal = num(r, 'principal');
+    const reps = repByBorrow.get(id) ?? [];
+    const total_repaid = reps.reduce((s, x) => s + x.amount, 0);
+    totalPrincipal += principal;
+    totalRepaidAll += total_repaid;
+    return {
+      id,
+      party_name: String(r.party_name ?? ''),
+      principal,
+      details: String(r.details ?? ''),
+      entry_date: pgDateToYmd(r.entry_date),
+      created_at: String(r.created_at),
+      updated_at: String(r.updated_at),
+      total_repaid,
+      balance: principal - total_repaid,
+      repayments: reps,
+    };
+  });
+  const totalBalance = borrowedEntries.reduce((s, e) => s + e.balance, 0);
+
+  const sp = await sql`
+    SELECT id, amount, category, description, note, spent_date, created_at, updated_at
+    FROM ledger_funds_spent
+    ORDER BY spent_date DESC, created_at DESC
+  `;
+  const spentEntries = (Array.isArray(sp) ? sp : []).map((r) =>
+    toLedgerFundsSpent(r as Record<string, unknown>)
+  );
+  const spentTotal = spentEntries.reduce((s, e) => s + e.amount, 0);
+
+  const pp = await sql`
+    SELECT id, amount, description, note, incurred_date, created_at, updated_at
+    FROM ledger_pending_payments
+    ORDER BY incurred_date DESC, created_at DESC
+  `;
+  const pendingEntries = (Array.isArray(pp) ? pp : []).map((r) =>
+    toLedgerPendingPayment(r as Record<string, unknown>)
+  );
+  const pendingTotal = pendingEntries.reduce((s, e) => s + e.amount, 0);
+
+  return {
+    partners: { total: partnersTotal, entries: partnerEntries },
+    borrowed: {
+      total_principal: totalPrincipal,
+      total_repaid: totalRepaidAll,
+      total_balance: totalBalance,
+      entries: borrowedEntries,
+    },
+    spent: { total: spentTotal, entries: spentEntries },
+    pending: { total: pendingTotal, entries: pendingEntries },
+  };
+}
+
+export async function createLedgerPartnerInvestment(data: {
+  partner_name: string;
+  amount: number;
+  note?: string;
+  entry_date: string;
+}): Promise<LedgerPartnerInvestment | null> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const amt = Math.floor(Number(data.amount) || 0);
+  if (amt <= 0) return null;
+  const name = (data.partner_name ?? '').trim();
+  if (!name) return null;
+  const note = (data.note ?? '').trim();
+  const d = (data.entry_date ?? '').trim() || pgDateToYmd(new Date());
+  const ins = await sql`
+    INSERT INTO ledger_partner_investments (partner_name, amount, note, entry_date)
+    VALUES (${name}, ${amt}, ${note}, ${d}::date)
+    RETURNING id, partner_name, amount, note, entry_date, created_at, updated_at
+  `;
+  const row = (ins as unknown[])[0];
+  return row ? toLedgerPartnerInvestment(row as Record<string, unknown>) : null;
+}
+
+export async function updateLedgerPartnerInvestment(
+  id: string,
+  data: { partner_name: string; amount: number; note?: string; entry_date: string }
+): Promise<LedgerPartnerInvestment | null> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const amt = Math.floor(Number(data.amount) || 0);
+  if (amt <= 0) return null;
+  const name = (data.partner_name ?? '').trim();
+  if (!name) return null;
+  const note = (data.note ?? '').trim();
+  const d = (data.entry_date ?? '').trim();
+  if (!d) return null;
+  const upd = await sql`
+    UPDATE ledger_partner_investments
+    SET partner_name = ${name}, amount = ${amt}, note = ${note}, entry_date = ${d}::date, updated_at = NOW()
+    WHERE id = ${id}::uuid
+    RETURNING id, partner_name, amount, note, entry_date, created_at, updated_at
+  `;
+  const row = (upd as unknown[])[0];
+  return row ? toLedgerPartnerInvestment(row as Record<string, unknown>) : null;
+}
+
+export async function deleteLedgerPartnerInvestment(id: string): Promise<boolean> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const del = await sql`DELETE FROM ledger_partner_investments WHERE id = ${id}::uuid RETURNING id`;
+  return (del as unknown[]).length > 0;
+}
+
+export async function createLedgerBorrowedFund(data: {
+  party_name: string;
+  principal: number;
+  details?: string;
+  entry_date: string;
+}): Promise<LedgerBorrowedFund | null> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const p = Math.floor(Number(data.principal) || 0);
+  if (p <= 0) return null;
+  const party = (data.party_name ?? '').trim();
+  if (!party) return null;
+  const details = (data.details ?? '').trim();
+  const d = (data.entry_date ?? '').trim() || pgDateToYmd(new Date());
+  const ins = await sql`
+    INSERT INTO ledger_borrowed_funds (party_name, principal, details, entry_date)
+    VALUES (${party}, ${p}, ${details}, ${d}::date)
+    RETURNING id, party_name, principal, details, entry_date, created_at, updated_at
+  `;
+  const row = (ins as unknown[])[0];
+  if (!row) return null;
+  const base = row as Record<string, unknown>;
+  return {
+    id: String(base.id),
+    party_name: String(base.party_name ?? ''),
+    principal: num(base, 'principal'),
+    details: String(base.details ?? ''),
+    entry_date: pgDateToYmd(base.entry_date),
+    created_at: String(base.created_at),
+    updated_at: String(base.updated_at),
+    total_repaid: 0,
+    balance: num(base, 'principal'),
+    repayments: [],
+  };
+}
+
+export async function updateLedgerBorrowedFund(
+  id: string,
+  data: { party_name: string; principal: number; details?: string; entry_date: string }
+): Promise<LedgerBorrowedFund | null> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const p = Math.floor(Number(data.principal) || 0);
+  if (p <= 0) return null;
+  const party = (data.party_name ?? '').trim();
+  if (!party) return null;
+  const details = (data.details ?? '').trim();
+  const d = (data.entry_date ?? '').trim();
+  if (!d) return null;
+  const sumR = await sql`
+    SELECT COALESCE(SUM(amount), 0)::int AS s FROM ledger_borrowed_repayments WHERE borrowed_fund_id = ${id}::uuid
+  `;
+  const repaid = Number((sumR as unknown as { s: number }[])[0]?.s ?? 0);
+  if (p < repaid) return null;
+  const upd = await sql`
+    UPDATE ledger_borrowed_funds
+    SET party_name = ${party}, principal = ${p}, details = ${details}, entry_date = ${d}::date, updated_at = NOW()
+    WHERE id = ${id}::uuid
+    RETURNING id, party_name, principal, details, entry_date, created_at, updated_at
+  `;
+  const row = (upd as unknown[])[0];
+  if (!row) return null;
+  const base = row as Record<string, unknown>;
+  const principal = num(base, 'principal');
+  return {
+    id: String(base.id),
+    party_name: String(base.party_name ?? ''),
+    principal,
+    details: String(base.details ?? ''),
+    entry_date: pgDateToYmd(base.entry_date),
+    created_at: String(base.created_at),
+    updated_at: String(base.updated_at),
+    total_repaid: repaid,
+    balance: principal - repaid,
+    repayments: [],
+  };
+}
+
+export async function deleteLedgerBorrowedFund(id: string): Promise<boolean> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const del = await sql`DELETE FROM ledger_borrowed_funds WHERE id = ${id}::uuid RETURNING id`;
+  return (del as unknown[]).length > 0;
+}
+
+export async function createLedgerBorrowedRepayment(data: {
+  borrowed_fund_id: string;
+  amount: number;
+  note?: string;
+  payment_date: string;
+}): Promise<LedgerBorrowedRepayment | null> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const amt = Math.floor(Number(data.amount) || 0);
+  if (amt <= 0) return null;
+  const bid = (data.borrowed_fund_id ?? '').trim();
+  if (!bid) return null;
+  const note = (data.note ?? '').trim();
+  const d = (data.payment_date ?? '').trim() || pgDateToYmd(new Date());
+  const exists = await sql`SELECT 1 FROM ledger_borrowed_funds WHERE id = ${bid}::uuid`;
+  if (!Array.isArray(exists) || exists.length === 0) return null;
+  const ins = await sql`
+    INSERT INTO ledger_borrowed_repayments (borrowed_fund_id, amount, note, payment_date)
+    VALUES (${bid}::uuid, ${amt}, ${note}, ${d}::date)
+    RETURNING id, borrowed_fund_id, amount, note, payment_date, created_at
+  `;
+  const row = (ins as unknown[])[0];
+  return row ? toLedgerBorrowedRepayment(row as Record<string, unknown>) : null;
+}
+
+export async function deleteLedgerBorrowedRepayment(id: string): Promise<boolean> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const del = await sql`DELETE FROM ledger_borrowed_repayments WHERE id = ${id}::uuid RETURNING id`;
+  return (del as unknown[]).length > 0;
+}
+
+export async function createLedgerFundsSpent(data: {
+  amount: number;
+  category?: string;
+  description?: string;
+  note?: string;
+  spent_date: string;
+}): Promise<LedgerFundsSpent | null> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const amt = Math.floor(Number(data.amount) || 0);
+  if (amt <= 0) return null;
+  const category = (data.category ?? '').trim();
+  const description = (data.description ?? '').trim();
+  const note = (data.note ?? '').trim();
+  const d = (data.spent_date ?? '').trim() || pgDateToYmd(new Date());
+  const ins = await sql`
+    INSERT INTO ledger_funds_spent (amount, category, description, note, spent_date)
+    VALUES (${amt}, ${category}, ${description}, ${note}, ${d}::date)
+    RETURNING id, amount, category, description, note, spent_date, created_at, updated_at
+  `;
+  const row = (ins as unknown[])[0];
+  return row ? toLedgerFundsSpent(row as Record<string, unknown>) : null;
+}
+
+export async function updateLedgerFundsSpent(
+  id: string,
+  data: {
+    amount: number;
+    category?: string;
+    description?: string;
+    note?: string;
+    spent_date: string;
+  }
+): Promise<LedgerFundsSpent | null> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const amt = Math.floor(Number(data.amount) || 0);
+  if (amt <= 0) return null;
+  const category = (data.category ?? '').trim();
+  const description = (data.description ?? '').trim();
+  const note = (data.note ?? '').trim();
+  const d = (data.spent_date ?? '').trim();
+  if (!d) return null;
+  const upd = await sql`
+    UPDATE ledger_funds_spent
+    SET amount = ${amt}, category = ${category}, description = ${description}, note = ${note},
+        spent_date = ${d}::date, updated_at = NOW()
+    WHERE id = ${id}::uuid
+    RETURNING id, amount, category, description, note, spent_date, created_at, updated_at
+  `;
+  const row = (upd as unknown[])[0];
+  return row ? toLedgerFundsSpent(row as Record<string, unknown>) : null;
+}
+
+export async function deleteLedgerFundsSpent(id: string): Promise<boolean> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const del = await sql`DELETE FROM ledger_funds_spent WHERE id = ${id}::uuid RETURNING id`;
+  return (del as unknown[]).length > 0;
+}
+
+export async function createLedgerPendingPayment(data: {
+  amount: number;
+  description?: string;
+  note?: string;
+  incurred_date: string;
+}): Promise<LedgerPendingPayment | null> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const amt = Math.floor(Number(data.amount) || 0);
+  if (amt <= 0) return null;
+  const description = (data.description ?? '').trim();
+  const note = (data.note ?? '').trim();
+  const d = (data.incurred_date ?? '').trim() || pgDateToYmd(new Date());
+  const ins = await sql`
+    INSERT INTO ledger_pending_payments (amount, description, note, incurred_date)
+    VALUES (${amt}, ${description}, ${note}, ${d}::date)
+    RETURNING id, amount, description, note, incurred_date, created_at, updated_at
+  `;
+  const row = (ins as unknown[])[0];
+  return row ? toLedgerPendingPayment(row as Record<string, unknown>) : null;
+}
+
+export async function updateLedgerPendingPayment(
+  id: string,
+  data: { amount: number; description?: string; note?: string; incurred_date: string }
+): Promise<LedgerPendingPayment | null> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const amt = Math.floor(Number(data.amount) || 0);
+  if (amt <= 0) return null;
+  const description = (data.description ?? '').trim();
+  const note = (data.note ?? '').trim();
+  const d = (data.incurred_date ?? '').trim();
+  if (!d) return null;
+  const upd = await sql`
+    UPDATE ledger_pending_payments
+    SET amount = ${amt}, description = ${description}, note = ${note}, incurred_date = ${d}::date, updated_at = NOW()
+    WHERE id = ${id}::uuid
+    RETURNING id, amount, description, note, incurred_date, created_at, updated_at
+  `;
+  const row = (upd as unknown[])[0];
+  return row ? toLedgerPendingPayment(row as Record<string, unknown>) : null;
+}
+
+export async function deleteLedgerPendingPayment(id: string): Promise<boolean> {
+  await ensureSchemaOnce();
+  const sql = getSql();
+  const del = await sql`DELETE FROM ledger_pending_payments WHERE id = ${id}::uuid RETURNING id`;
   return (del as unknown[]).length > 0;
 }
 

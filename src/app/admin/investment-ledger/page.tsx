@@ -16,8 +16,8 @@ export default function AdminInvestmentLedgerPage() {
         </Link>
       </div>
       <p className="text-sm text-neutral-600">
-        Partner and external borrowings, ledger expenses, and pending bills with payment history.
-        Only admins can view or change this data.
+        Partner investments, borrowed funds (with repayments), funds spent, and pending payments.
+        Data is stored in dedicated ledger tables (not hall expenditures). Admins only.
       </p>
       <InvestmentLedgerClient />
     </div>
